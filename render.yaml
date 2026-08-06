@@ -31,7 +31,7 @@ services:
     runtime: node
     rootDir: drip-frontend
     buildCommand: npm install --include=dev && npm run build
-    startCommand: node .next/standalone/server.js
+    startCommand: npm run start
     envVars:
       - key: NODE_ENV
         value: production
