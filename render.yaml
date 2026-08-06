@@ -17,7 +17,7 @@ services:
       - key: TWITTER_API_KEY
         sync: false          # get from twitterapi.io/dashboard
       - key: SOLANA_RPC_URL
-        sync: false          # Helius/QuickNode recommended — mainnet-beta for prod
+        sync: false          # https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
       - key: TREASURY_PRIVATE_KEY
         sync: false          # base58 private key of treasury wallet
       - key: DRIP_MINT_ADDRESS
@@ -38,4 +38,4 @@ services:
       - key: NEXT_PUBLIC_API_URL
         sync: false          # set to your drip-server Render URL e.g. https://drip-server.onrender.com
       - key: NEXT_PUBLIC_SOLANA_RPC
-        sync: false          # same RPC as server (or a public one)
+        sync: false          # https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
