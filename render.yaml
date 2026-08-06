@@ -4,7 +4,7 @@ services:
     name: drip-server
     runtime: node
     rootDir: drip-server
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/index.js
     healthCheckPath: /health
     envVars:
@@ -30,7 +30,7 @@ services:
     name: drip-frontend
     runtime: node
     rootDir: drip-frontend
-    buildCommand: npm install && npm run build
+    buildCommand: npm install --include=dev && npm run build
     startCommand: node .next/standalone/server.js
     envVars:
       - key: NODE_ENV
