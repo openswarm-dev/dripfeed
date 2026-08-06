@@ -1,0 +1,20 @@
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Next.js
+drip-frontend/.next/
+drip-frontend/out/
+
+# Build output
+drip-server/dist/
+
+# Environment secrets — NEVER commit these
+drip-frontend/.env.local
+drip-server/.env
+
+# OS
+.DS_Store
+Thumbs.db
