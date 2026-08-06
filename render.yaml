@@ -1,0 +1,41 @@
+services:
+  # ── drip-server ────────────────────────────────────────────────────────────
+  - type: web
+    name: drip-server
+    runtime: node
+    rootDir: drip-server
+    buildCommand: npm install && npm run build
+    startCommand: node dist/index.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 4000
+      - key: FRONTEND_URL
+        sync: false          # set in Render dashboard → paste your frontend URL
+      - key: TWITTER_API_KEY
+        sync: false          # get from twitterapi.io/dashboard
+      - key: SOLANA_RPC_URL
+        sync: false          # Helius/QuickNode recommended — mainnet-beta for prod
+      - key: TREASURY_PRIVATE_KEY
+        sync: false          # base58 private key of treasury wallet
+      - key: DRIP_MINT_ADDRESS
+        sync: false          # SPL token mint (set when you launch the token)
+      - key: REWARD_POLL_INTERVAL_MS
+        value: 300000        # 5 minutes
+
+  # ── drip-frontend ──────────────────────────────────────────────────────────
+  - type: web
+    name: drip-frontend
+    runtime: node
+    rootDir: drip-frontend
+    buildCommand: npm install && npm run build
+    startCommand: node .next/standalone/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        sync: false          # set to your drip-server Render URL e.g. https://drip-server.onrender.com
+      - key: NEXT_PUBLIC_SOLANA_RPC
+        sync: false          # same RPC as server (or a public one)
