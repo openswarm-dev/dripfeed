@@ -1,0 +1,98 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ── Users ──────────────────────────────────────────────────────────────────────
+// Primary identity is X account. Wallet is linked to it.
+model User {
+  id             String   @id @default(uuid())
+  twitterId      String   @unique @map("twitter_id")
+  twitterHandle  String   @map("twitter_handle")
+  twitterName    String?  @map("twitter_name")
+  twitterPfp     String?  @map("twitter_pfp")
+  twitterFollowers Int    @default(0) @map("twitter_followers")
+  walletAddress  String?  @unique @map("wallet_address")
+  // Stored to refresh tweet data on behalf of the user if needed
+  oauthToken     String?  @map("oauth_token")
+  oauthSecret    String?  @map("oauth_secret")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  posts  Post[]
+  vault  Vault?
+  claims Claim[]
+
+  @@map("users")
+}
+
+// ── Campaigns ──────────────────────────────────────────────────────────────────
+model Campaign {
+  id            String   @id
+  project       String
+  logo          String
+  budgetTotal   Decimal  @map("budget_total")  @db.Decimal(14, 2)
+  budgetLeft    Decimal  @map("budget_left")   @db.Decimal(14, 2)
+  goal          BigInt
+  verified      BigInt   @default(0)
+  rateLabel     String   @map("rate_label")
+  dripPerKViews Decimal  @map("drip_per_k_views") @db.Decimal(10, 6)
+  participants  Int      @default(0)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  posts Post[]
+
+  @@map("campaigns")
+}
+
+// ── Posts ──────────────────────────────────────────────────────────────────────
+model Post {
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  tweetId       String   @unique @map("tweet_id")
+  tweetUrl      String   @map("tweet_url")
+  campaignId    String   @map("campaign_id")
+  impressions   BigInt   @default(0)
+  totalEarned   Decimal  @default(0) @map("total_earned") @db.Decimal(12, 6)
+  verified      Boolean  @default(true)
+  submittedAt   DateTime @default(now()) @map("submitted_at")
+  lastRefreshed DateTime @default(now()) @map("last_refreshed")
+
+  user     User     @relation(fields: [userId], references: [id])
+  campaign Campaign @relation(fields: [campaignId], references: [id])
+
+  @@map("posts")
+}
+
+// ── Vaults ──────────────────────────────────────────────────────────────────────
+model Vault {
+  id             String   @id @default(uuid())
+  userId         String   @unique @map("user_id")
+  balance        Decimal  @default(0) @db.Decimal(12, 6)
+  claimable      Decimal  @default(0) @db.Decimal(12, 6)
+  lifetimeEarned Decimal  @default(0) @map("lifetime_earned") @db.Decimal(12, 6)
+  fillPct        Decimal  @default(0) @map("fill_pct") @db.Decimal(5, 2)
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("vaults")
+}
+
+// ── Claims ─────────────────────────────────────────────────────────────────────
+model Claim {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  amount      Decimal  @db.Decimal(12, 6)
+  txSignature String?  @map("tx_signature")
+  status      String   @default("pending") // pending | confirmed | failed
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("claims")
+}

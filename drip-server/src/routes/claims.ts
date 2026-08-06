@@ -1,79 +1,78 @@
 import { Router, Request, Response } from 'express';
+import { prisma } from '../lib/prisma';
+import { requireAuth, AuthPayload } from '../middleware/auth';
 import { isValidSolanaAddress, transferDrip } from '../services/solana';
-import { store } from '../store';
 
 export const claimsRouter = Router();
 
-const MIN_CLAIM = 0.01; // Minimum DRIP per claim
+const MIN_CLAIM = 0.01;
 
-/** POST /api/claims — claim DRIP from vault */
-claimsRouter.post('/', async (req: Request, res: Response) => {
-  const { walletAddress, amount } = req.body as {
-    walletAddress: string;
-    amount: number;
-  };
+claimsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
+  const { amount } = req.body as { amount: number };
+  const { userId } = (req as Request & { user: AuthPayload }).user;
 
-  if (!walletAddress || amount == null) {
-    res.status(400).json({ error: 'Missing walletAddress or amount' });
-    return;
-  }
-
-  if (!isValidSolanaAddress(walletAddress)) {
-    res.status(400).json({ error: 'Invalid Solana wallet address' });
-    return;
-  }
-
-  if (amount < MIN_CLAIM) {
+  if (amount == null || amount < MIN_CLAIM) {
     res.status(400).json({ error: `Minimum claim is ${MIN_CLAIM} DRIP` });
     return;
   }
 
-  const vault = store.vaults.get(walletAddress);
-  if (!vault) {
-    res.status(404).json({ error: 'Vault not found — connect your wallet and earn DRIP first' });
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user?.walletAddress) {
+    res.status(400).json({ error: 'Connect a Solana wallet before claiming' });
     return;
   }
 
-  if (vault.claimable < amount) {
+  if (!isValidSolanaAddress(user.walletAddress)) {
+    res.status(400).json({ error: 'Invalid wallet address on account' });
+    return;
+  }
+
+  const vault = await prisma.vault.findUnique({ where: { userId } });
+  if (!vault) { res.status(404).json({ error: 'Vault not found' }); return; }
+
+  if (Number(vault.claimable) < amount) {
     res.status(400).json({
-      error: `Insufficient claimable balance. Available: ${vault.claimable.toFixed(4)} DRIP`,
+      error: `Insufficient balance. Available: ${Number(vault.claimable).toFixed(4)} DRIP`,
     });
     return;
   }
 
+  // Optimistic deduction
+  const updated = await prisma.vault.update({
+    where: { userId },
+    data: {
+      claimable: { decrement: amount },
+      balance:   { decrement: amount },
+      fillPct:   Math.max(0, Number(vault.fillPct) - (amount / 2000) * 100),
+    },
+  });
+
+  let txSignature: string;
   try {
-    // Deduct from vault optimistically before the on-chain transfer
-    vault.claimable -= amount;
-    vault.balance   -= amount;
-    vault.fillPct    = Math.min(95, (vault.balance / 2_000) * 100);
-    vault.lastUpdated = new Date().toISOString();
-
-    let txSignature: string;
-
     if (!process.env.DRIP_MINT_ADDRESS || !process.env.TREASURY_PRIVATE_KEY) {
-      // Dev mode: return a mock signature
-      console.warn('[Claims] Solana env vars not set — returning mock tx signature');
-      txSignature = `mock_${Date.now()}`;
+      txSignature = `dev_${Date.now()}`;
     } else {
-      txSignature = await transferDrip(walletAddress, amount);
+      txSignature = await transferDrip(user.walletAddress, amount);
     }
 
+    // Record claim
+    await prisma.claim.create({ data: { userId, amount, txSignature, status: 'confirmed' } });
+
     res.json({
-      success:      true,
-      claimed:      amount,
+      success: true,
+      claimed: amount,
       txSignature,
-      explorerUrl:  `https://solscan.io/tx/${txSignature}`,
-      vault: {
-        balance:   vault.balance,
-        claimable: vault.claimable,
-        fillPct:   vault.fillPct,
-      },
+      explorerUrl: `https://solscan.io/tx/${txSignature}`,
+      vault: { balance: Number(updated.balance), claimable: Number(updated.claimable), fillPct: Number(updated.fillPct) },
     });
   } catch (err) {
     // Rollback on failure
-    vault.claimable += amount;
-    vault.balance   += amount;
+    await prisma.vault.update({
+      where: { userId },
+      data: { claimable: { increment: amount }, balance: { increment: amount } },
+    });
+    await prisma.claim.create({ data: { userId, amount, status: 'failed' } });
     console.error('[Claims] Transfer failed:', err);
-    res.status(500).json({ error: 'On-chain transfer failed — please try again' });
+    res.status(500).json({ error: 'Transfer failed — please try again' });
   }
 });

@@ -1,17 +1,15 @@
 import { Router, Request, Response } from 'express';
-import { store } from '../store';
+import { prisma } from '../lib/prisma';
 
 export const campaignsRouter = Router();
 
-campaignsRouter.get('/', (_req: Request, res: Response) => {
-  res.json({ campaigns: store.campaigns.filter(c => c.active) });
+campaignsRouter.get('/', async (_req: Request, res: Response) => {
+  const campaigns = await prisma.campaign.findMany({ where: { active: true } });
+  res.json({ campaigns });
 });
 
-campaignsRouter.get('/:id', (req: Request, res: Response) => {
-  const campaign = store.campaigns.find(c => c.id === req.params.id);
-  if (!campaign) {
-    res.status(404).json({ error: 'Campaign not found' });
-    return;
-  }
+campaignsRouter.get('/:id', async (req: Request, res: Response) => {
+  const campaign = await prisma.campaign.findUnique({ where: { id: req.params.id as string } });
+  if (!campaign) { res.status(404).json({ error: 'Campaign not found' }); return; }
   res.json({ campaign });
 });

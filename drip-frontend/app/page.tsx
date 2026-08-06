@@ -869,41 +869,48 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, walletAddress, twitterHand
 }
 
 // ─── Landing ──────────────────────────────────────────────────────────────────
-function Landing({ onDone }: { onDone: (handle: string) => void }) {
-  const { connect, publicKey, connected, connecting } = useWallet();
+function Landing({ onDone }: { onDone: (handle: string, token: string) => void }) {
+  const { publicKey, connected } = useWallet();
   const { setVisible } = useWalletModal();
-  const [handle,    setHandle]    = useState("");
-  const [handleSet, setHandleSet] = useState(false);
-  const [xErr,      setXErr]      = useState("");
 
-  // When wallet connects after user confirmed their handle, enter the app
+  // Parse ?token=...&handle=... from URL after X OAuth callback
+  const [xToken,   setXToken]   = useState("");
+  const [xHandle,  setXHandle]  = useState("");
+  const [authError, setAuthError] = useState("");
+
   useEffect(() => {
-    if (connected && publicKey && handleSet) {
-      const clean = handle.replace(/^@/, "").trim();
-      setTimeout(() => onDone(clean), 500);
+    const p = new URLSearchParams(window.location.search);
+    const token = p.get("token") ?? "";
+    const handle = p.get("handle") ?? "";
+    const err    = p.get("auth_error") ?? "";
+    if (token && handle) { setXToken(token); setXHandle(handle); }
+    if (err) setAuthError(err === "denied" ? "You declined X sign-in." : "X sign-in failed. Please try again.");
+    // Clean URL
+    if (token || err) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
+  // After wallet connects (and X is authed), enter app
+  useEffect(() => {
+    if (connected && publicKey && xToken && xHandle) {
+      // Link wallet to account on server
+      fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/wallet`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${xToken}` },
+        body: JSON.stringify({ walletAddress: publicKey.toString() }),
+      }).finally(() => onDone(xHandle, xToken));
     }
-  }, [connected, publicKey, handleSet, handle, onDone]);
+  }, [connected, publicKey, xToken, xHandle, onDone]);
 
-  function confirmHandle() {
-    const clean = handle.replace(/^@/, "").trim();
-    if (!clean) { setXErr("Enter your X handle to continue"); return; }
-    if (!/^[A-Za-z0-9_]{1,15}$/.test(clean)) { setXErr("Invalid X handle — letters, numbers and underscores only"); return; }
-    setXErr("");
-    setHandleSet(true);
+  function signInWithX() {
+    window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/x`;
   }
 
-  function connectWallet() {
-    if (!handleSet) return;
-    setVisible(true);
-  }
-
-  const xDone  = handleSet;
-  const wDone  = connected && !!publicKey;
+  const xDone = !!xToken && !!xHandle;
+  const wDone = connected && !!publicKey;
 
   return (
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
       style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:T.bg }}>
-      {/* Ambient orbs */}
       <div style={{ position:"absolute", left:"-20%", top:"8%", width:640, height:640, borderRadius:"50%", background:"rgba(110,255,160,0.1)", filter:"blur(160px)", animation:"drift 22s ease-in-out infinite", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", right:"-15%", top:"12%", width:560, height:560, borderRadius:"50%", background:"rgba(167,139,255,0.1)", filter:"blur(150px)", animation:"drift 26s ease-in-out infinite", animationDelay:"-9s", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", bottom:"-10%", left:"30%", width:500, height:500, borderRadius:"50%", background:"rgba(96,208,255,0.08)", filter:"blur(130px)", animation:"drift 30s ease-in-out infinite", pointerEvents:"none" }}/>
@@ -917,36 +924,31 @@ function Landing({ onDone }: { onDone: (handle: string) => void }) {
           </p>
         </motion.div>
 
+        {authError && (
+          <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }}
+            style={{ background:"rgba(255,80,80,0.08)", border:"1px solid rgba(255,80,80,0.2)", borderRadius:12, padding:"10px 16px", marginBottom:16 }}>
+            <p style={{ fontSize:13, color:"#ff7070" }}>{authError}</p>
+          </motion.div>
+        )}
+
         <motion.div initial={{ opacity:0, y:24 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.7, ease, delay:0.15 }}
           style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:22, overflow:"hidden", boxShadow:"0 40px 80px -20px rgba(0,0,0,0.55)", marginBottom:18 }}>
           <div className="rainbow-bg" style={{ height:2 }}/>
           <div style={{ padding:22, display:"flex", flexDirection:"column", gap:8 }}>
 
-            {/* Step 1: X handle */}
-            <div style={{ background:T.el, borderRadius:12, border:`1px solid ${xDone?"rgba(110,255,160,0.2)":xErr?"rgba(255,80,80,0.3)":T.border}`, overflow:"hidden", transition:"border-color 0.4s" }}>
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:11 }}>
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill={xDone?"#6effa0":T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-                  <span style={{ fontSize:14, fontWeight:600, color:xDone?T.fg:T.subtle }}>Your X Handle</span>
-                </div>
-                {xDone
-                  ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{handle.replace(/^@/,"")}</span>
-                  : <button data-cursor-hover onClick={confirmHandle} className="rainbow-bg" style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0B", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>Confirm</button>
-                }
+            {/* Step 1: Sign in with X */}
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", background:T.el, borderRadius:12, border:`1px solid ${xDone?"rgba(110,255,160,0.2)":T.border}`, transition:"border-color 0.4s" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:11 }}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill={xDone?"#6effa0":T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                <span style={{ fontSize:14, fontWeight:600, color:xDone?T.fg:T.subtle }}>Sign in with X</span>
               </div>
-              {!xDone&&(
-                <div style={{ padding:"0 16px 14px" }}>
-                  <input
-                    value={handle}
-                    onChange={e=>{ setHandle(e.target.value); setXErr(""); }}
-                    onKeyDown={e=>e.key==="Enter"&&confirmHandle()}
-                    placeholder="@yourhandle"
-                    autoFocus
-                    style={{ width:"100%", height:38, background:"rgba(255,255,255,0.04)", border:`1px solid ${xErr?"rgba(255,80,80,0.4)":T.border}`, borderRadius:9, padding:"0 12px", fontSize:13, color:T.fg, outline:"none", fontFamily:"var(--font-geist-mono)", letterSpacing:"0.01em" }}
-                  />
-                  {xErr&&<p style={{ fontSize:11, color:"#ff7070", marginTop:6, textAlign:"left" }}>{xErr}</p>}
-                </div>
-              )}
+              {xDone
+                ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{xHandle}</span>
+                : <button data-cursor-hover onClick={signInWithX} className="rainbow-bg"
+                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0B", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    Connect
+                  </button>
+              }
             </div>
 
             {/* Step 2: Phantom wallet */}
@@ -955,14 +957,14 @@ function Landing({ onDone }: { onDone: (handle: string) => void }) {
                 <div style={{ width:15, height:15, borderRadius:4, background:wDone?"#6effa0":T.faint, transition:"background 0.4s" }}/>
                 <span style={{ fontSize:14, fontWeight:600, color:wDone?T.fg:T.subtle }}>Connect Phantom Wallet</span>
               </div>
-              {!xDone&&<span style={{ fontSize:11, color:T.faint }}>Confirm handle first</span>}
-              {xDone&&!wDone&&(
-                <button data-cursor-hover onClick={connectWallet} className="rainbow-bg"
-                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0B", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit", opacity:connecting?0.6:1 }}>
-                  {connecting?"Connecting…":"Connect"}
+              {!xDone && <span style={{ fontSize:11, color:T.faint }}>Sign in with X first</span>}
+              {xDone && !wDone && (
+                <button data-cursor-hover onClick={() => setVisible(true)} className="rainbow-bg"
+                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0B", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                  Connect
                 </button>
               )}
-              {wDone&&<span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ {publicKey!.toString().slice(0,6)}…{publicKey!.toString().slice(-4)}</span>}
+              {wDone && <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ {publicKey!.toString().slice(0,6)}…{publicKey!.toString().slice(-4)}</span>}
             </div>
           </div>
         </motion.div>
@@ -1006,7 +1008,7 @@ function Cursor() {
 }
 
 // ─── Main app ─────────────────────────────────────────────────────────────────
-function DripApp({ walletAddress, twitterHandle }: { walletAddress: string; twitterHandle: string }) {
+function DripApp({ walletAddress, twitterHandle, authToken }: { walletAddress: string; twitterHandle: string; authToken: string }) {
   const [balance,   setBalance]   = useState(0);
   const [claimable, setClaimable] = useState(0);
   const [fillPct,   setFillPct]   = useState(0);
@@ -1316,8 +1318,19 @@ export default function Page() {
   const { publicKey } = useWallet();
   const [screen,        setScreen]        = useState<Screen>("landing");
   const [twitterHandle, setTwitterHandle] = useState("");
+  const [authToken,     setAuthToken]     = useState("");
 
-  function handleLandingDone(handle: string) {
+  // Restore session from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("drip_token");
+    const handle = localStorage.getItem("drip_handle");
+    if (saved && handle) { setAuthToken(saved); setTwitterHandle(handle); setScreen("app"); }
+  }, []);
+
+  function handleLandingDone(handle: string, token: string) {
+    localStorage.setItem("drip_token", token);
+    localStorage.setItem("drip_handle", handle);
+    setAuthToken(token);
     setTwitterHandle(handle);
     setScreen("app");
   }
@@ -1330,7 +1343,7 @@ export default function Page() {
           {screen==="landing"
             ? <Landing key="landing" onDone={handleLandingDone}/>
             : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.5 }}>
-                <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle}/>
+                <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken}/>
               </motion.div>
           }
         </AnimatePresence>
