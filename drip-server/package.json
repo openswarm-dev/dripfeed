@@ -6,8 +6,7 @@
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "lint": "tsc --noEmit"
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@solana/spl-token": "^0.4.9",
@@ -23,11 +22,9 @@
     "express": "^4.21.2",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.0.0",
+    "ts-node-dev": "^2.0.0",
     "tweetnacl": "^1.0.3",
     "typescript": "^5.7.3",
     "uuid": "^11.0.5"
-  },
-  "devDependencies": {
-    "ts-node-dev": "^2.0.0"
   }
 }
