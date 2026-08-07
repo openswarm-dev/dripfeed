@@ -1208,36 +1208,24 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
       }}>
         <div style={{ width:"100%", maxWidth:1200, margin:"0 auto", padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
 
-          {/* Logo */}
-          <a href="#vault" data-cursor-hover style={{ display:"flex", alignItems:"center", gap:8, textDecoration:"none" }}>
-            <Image src="/logos/DripLogo.png" alt="DRIP" width={52} height={40} style={{ objectFit:"contain" }}/>
-            <span style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, border:`1px solid ${T.border}`, borderRadius:4, padding:"2px 6px", letterSpacing:"0.1em", textTransform:"uppercase" }}>beta</span>
+          {/* Logo — bigger */}
+          <a href="#vault" data-cursor-hover style={{ display:"flex", alignItems:"center", gap:10, textDecoration:"none" }}>
+            <Image src="/logos/DripLogo.png" alt="DRIP" width={72} height={54} style={{ objectFit:"contain" }}/>
+            <span style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, border:`1px solid ${T.border}`, borderRadius:4, padding:"2px 6px", letterSpacing:"0.12em", textTransform:"uppercase" }}>beta</span>
           </a>
 
-          {/* Nav links */}
-          <nav className="nav-links" style={{ display:"flex", alignItems:"center", gap:2 }}>
-            {[["#campaigns","Campaigns"],["#feed","Feed"]].map(([href,label])=>(
-              <a key={href} href={href} data-cursor-hover
-                style={{ padding:"6px 12px", borderRadius:8, fontSize:15, color:T.subtle, textDecoration:"none", transition:"color 0.2s", fontWeight:500 }}
-                onMouseEnter={e=>(e.currentTarget.style.color=T.fg)}
-                onMouseLeave={e=>(e.currentTarget.style.color=T.subtle)}>
-                {label}
-              </a>
-            ))}
-          </nav>
-
-          {/* Right side */}
+          {/* Right side — no nav links */}
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            {/* Account pills */}
+            {/* Account pills — same height as buttons */}
             <div className="nav-account" style={{ display:"flex", alignItems:"center", gap:8 }}>
               {twitterHandle && (
-                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, height:38, padding:"0 12px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill={T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
                   <span style={{ fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>@{twitterHandle}</span>
                 </div>
               )}
               {walletAddress && (
-                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, height:38, padding:"0 12px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>
                   <span className="rainbow-bg" style={{ display:"inline-flex", width:6, height:6, borderRadius:"50%", flexShrink:0 }}/>
                   {walletAddress.slice(0,6)}…{walletAddress.slice(-4)}
                 </div>
@@ -1252,7 +1240,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
             </button>
 
             <button onClick={onLogout} data-cursor-hover title="Log out"
-              style={{ height:38, width:34, borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
+              style={{ height:38, width:38, borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
               onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color="#ff5555"; (e.currentTarget as HTMLElement).style.borderColor="#ff5555"; }}
               onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1279,6 +1267,60 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
 }
 
 // â”€â”€â”€ Landing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ─── Cinematic intro ─────────────────────────────────────────────────────────
+function CinematicIntro({ onComplete }: { onComplete: () => void }) {
+  const [phase, setPhase] = useState<"in"|"pulse"|"grow"|"out">("in");
+
+  useEffect(() => {
+    const t1 = setTimeout(() => setPhase("pulse"),  500);
+    const t2 = setTimeout(() => setPhase("grow"),  1400);
+    const t3 = setTimeout(() => setPhase("out"),   2000);
+    const t4 = setTimeout(onComplete,              2800);
+    return () => [t1, t2, t3, t4].forEach(clearTimeout);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const logoVariants: Record<string, { opacity: number | number[]; scale: number | number[]; filter: string }> = {
+    in:    { opacity:1, scale:1,                        filter:"blur(0px)" },
+    pulse: { opacity:1, scale:[1, 1.07, 0.96, 1.12, 1], filter:"blur(0px)" },
+    grow:  { opacity:1, scale:5,                        filter:"blur(8px)" },
+    out:   { opacity:0, scale:7,                        filter:"blur(20px)" },
+  };
+
+  const dur = phase==="in" ? 0.55 : phase==="pulse" ? 0.9 : phase==="grow" ? 0.65 : 0.75;
+  const logoEase =
+    phase==="pulse" ? "easeInOut" :
+    phase==="grow"  ? [0.2,0,0.8,1] as [number,number,number,number] :
+                      [0.16,1,0.3,1] as [number,number,number,number];
+
+  return (
+    <motion.div
+      animate={{ opacity: phase === "out" ? 0 : 1 }}
+      transition={{ duration: phase === "out" ? 0.75 : 0.01 }}
+      style={{ position:"fixed", inset:0, zIndex:9999, background:T.bg,
+        display:"flex", alignItems:"center", justifyContent:"center", pointerEvents:"none" }}>
+
+      {/* Ambient glow */}
+      <motion.div
+        animate={{ opacity: phase==="pulse" || phase==="grow" ? 1 : 0, scale: phase==="grow" ? 3 : 1 }}
+        transition={{ duration: 0.8 }}
+        style={{ position:"absolute", width:400, height:400, borderRadius:"50%",
+          background:"radial-gradient(circle, rgba(200,180,255,0.15) 0%, rgba(180,210,255,0.08) 40%, transparent 70%)",
+          pointerEvents:"none" }}/>
+
+      {/* Logo */}
+      <motion.div
+        initial={{ opacity:0, scale:0.7, filter:"blur(8px)" }}
+        animate={logoVariants[phase]}
+        transition={{ duration: dur, ease: logoEase }}>
+        <Image src="/logos/DripLogo.png" alt="DRIP" width={160} height={120}
+          style={{ objectFit:"contain", display:"block" }}/>
+      </motion.div>
+    </motion.div>
+  );
+}
+
+
 function Landing({ onDone }: { onDone: (handle: string, token: string) => void }) {
   const { publicKey, connected } = useWallet();
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -1724,8 +1766,9 @@ export default function Page() {
   const [screen,        setScreen]        = useState<Screen>("landing");
   const [twitterHandle, setTwitterHandle] = useState("");
   const [authToken,     setAuthToken]     = useState("");
+  const [showIntro,     setShowIntro]     = useState(false);
 
-  // Restore session from localStorage
+  // Restore session (no cinematic on auto-restore)
   useEffect(() => {
     const saved = localStorage.getItem("drip_token");
     const handle = localStorage.getItem("drip_handle");
@@ -1737,6 +1780,8 @@ export default function Page() {
     localStorage.setItem("drip_handle", handle);
     setAuthToken(token);
     setTwitterHandle(handle);
+    // Show cinematic intro, then reveal app
+    setShowIntro(true);
     setScreen("app");
   }
 
@@ -1756,10 +1801,17 @@ export default function Page() {
           <AnimatePresence mode="wait">
             {screen==="landing"
               ? <Landing key="landing" onDone={handleLandingDone}/>
-              : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.5 }}>
+              : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.4, delay: showIntro ? 2.4 : 0 }}>
                   <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken} onLogout={handleLogout}/>
                 </motion.div>
             }
+          </AnimatePresence>
+
+          {/* Cinematic intro overlay — only on fresh login */}
+          <AnimatePresence>
+            {showIntro && (
+              <CinematicIntro key="intro" onComplete={() => setShowIntro(false)}/>
+            )}
           </AnimatePresence>
         </div>
       </div>
