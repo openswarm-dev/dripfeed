@@ -4,7 +4,7 @@
 
 html {
   scroll-behavior: smooth;
-  background: #0F1113;
+  background: #050508;
   cursor: none;
 }
 
@@ -13,8 +13,8 @@ html {
 }
 
 body {
-  background: #0F1113;
-  color: #F9F9FA;
+  background: #050508;
+  color: #F0EEFF;
   font-family: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -23,12 +23,12 @@ body {
 
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
-::-webkit-scrollbar-track { background: #0F1113; }
-::-webkit-scrollbar-thumb { background: #2B2D2F; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #3A3C3E; }
+::-webkit-scrollbar-track { background: #050508; }
+::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.5); }
 
 /* Selection */
-::selection { background: #6effa0; color: #0A0A0B; }
+::selection { background: #A855F7; color: #fff; }
 
 /* ── Ping (live indicators) ── */
 @keyframes ping {
@@ -55,30 +55,66 @@ body {
 }
 
 .grid-dots-dark {
-  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.08) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(168,85,247,0.12) 1px, transparent 0);
   background-size: 24px 24px;
 }
 
-/* ── Rainbow / holographic gradient utilities ── */
-@keyframes rainbow-flow {
+/* ── Holographic iridescent gradient ── */
+@keyframes holo-flow {
   0%   { background-position: 0%   50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0%   50%; }
 }
 
+/* ── Neon border pulse ── */
+@keyframes neon-pulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1;   }
+}
+
 .rainbow-text {
-  background: linear-gradient(90deg, #ff6ec7, #ff9a3c, #ffe04b, #6effa0, #60d0ff, #a78bff, #ff6ec7);
+  background: linear-gradient(90deg, #A855F7, #818CF8, #60A5FA, #22D3EE, #818CF8, #A855F7);
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: rainbow-flow 5s linear infinite;
+  animation: holo-flow 5s linear infinite;
 }
 
 .rainbow-bg {
-  background: linear-gradient(90deg, #ff6ec7, #ff9a3c, #ffe04b, #6effa0, #60d0ff, #a78bff, #ff6ec7);
+  background: linear-gradient(90deg, #A855F7, #818CF8, #60A5FA, #22D3EE, #818CF8, #A855F7);
   background-size: 300% 100%;
-  animation: rainbow-flow 5s linear infinite;
+  animation: holo-flow 5s linear infinite;
+}
+
+/* ── Glass card ── */
+.glass-card {
+  background: linear-gradient(135deg, rgba(168,85,247,0.06) 0%, rgba(96,165,250,0.03) 100%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(168,85,247,0.2);
+  box-shadow:
+    0 0 0 1px rgba(96,165,250,0.08),
+    inset 0 1px 0 rgba(255,255,255,0.08),
+    0 24px 64px rgba(0,0,0,0.6);
+}
+
+/* ── Neon border wrapper (gradient border trick) ── */
+.neon-border {
+  position: relative;
+}
+.neon-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, #A855F7, #60A5FA, #22D3EE, #A855F7);
+  background-size: 300% 100%;
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: holo-flow 4s linear infinite, neon-pulse 3s ease-in-out infinite;
+  pointer-events: none;
 }
 
 /* ── Ticker marquee ── */
@@ -103,14 +139,14 @@ body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
 }
-.stat-border { border-right: 1px solid #252729; }
+.stat-border { border-right: 1px solid rgba(168,85,247,0.12); }
 @media (max-width: 768px) {
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
   }
   .stat-border { border-right: none; }
-  .stats-grid > *:nth-child(-n+2) { border-bottom: 1px solid #252729; }
-  .stats-grid > *:nth-child(odd)  { border-right: 1px solid #252729; }
+  .stats-grid > *:nth-child(-n+2) { border-bottom: 1px solid rgba(168,85,247,0.12); }
+  .stats-grid > *:nth-child(odd)  { border-right: 1px solid rgba(168,85,247,0.12); }
 }
 
 /* ── Campaign grid ── */
