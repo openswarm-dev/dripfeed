@@ -1,4 +1,10 @@
 import 'dotenv/config';
+
+// BigInt can't be serialized by JSON.stringify natively — convert to string
+(BigInt.prototype as unknown as { toJSON: () => string }).toJSON = function () {
+  return this.toString();
+};
+
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
