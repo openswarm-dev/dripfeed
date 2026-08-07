@@ -36,20 +36,25 @@ app.use('/api/claims',    claimsRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 
-async function start() {
-  await prisma.$connect();
-  console.log('[DB] Connected to PostgreSQL');
+// Start listening immediately — don't block on DB
+app.listen(PORT, () => {
+  console.log(`\n drip-server on http://localhost:${PORT}`);
+  console.log(`   X Consumer Key: ${process.env.X_CONSUMER_KEY ? '✓' : '✗ MISSING'}`);
+  console.log(`   JWT Secret:     ${process.env.JWT_SECRET ? '✓' : '✗ MISSING'}`);
+  console.log(`   Database:       ${process.env.DATABASE_URL ? '✓' : '✗ MISSING'}\n`);
+});
 
-  await seedCampaigns();
-
-  app.listen(PORT, () => {
-    console.log(`\n🚀 drip-server on http://localhost:${PORT}`);
-    console.log(`   X Consumer Key: ${process.env.X_CONSUMER_KEY ? '✓' : '✗ MISSING'}`);
-    console.log(`   Twitter API:    ${process.env.TWITTER_API_KEY ? '✓' : '✗ MISSING'}`);
-    console.log(`   JWT Secret:     ${process.env.JWT_SECRET ? '✓' : '✗ MISSING'}`);
-    console.log(`   Database:       ${process.env.DATABASE_URL ? '✓' : '✗ MISSING'}\n`);
+// Connect DB and seed in background so healthcheck passes immediately
+async function initDb() {
+  try {
+    await prisma.$connect();
+    console.log('[DB] Connected to PostgreSQL');
+    await seedCampaigns();
     startRewardEngine();
-  });
+  } catch (err) {
+    console.error('[DB] Connection failed — retrying in 5s:', err);
+    setTimeout(initDb, 5_000);
+  }
 }
 
-start().catch(err => { console.error(err); process.exit(1); });
+initDb();
