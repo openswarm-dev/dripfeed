@@ -15,9 +15,9 @@ import type { Campaign as APICampaign, Post as APIPost, Vault as APIVault } from
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
-  bg:      "#050508",
-  surface: "#08080C",
-  el:      "rgba(255,255,255,0.04)",
+  bg:      "#111114",
+  surface: "#18181C",
+  el:      "rgba(255,255,255,0.05)",
   border:  "rgba(255,255,255,0.09)",
   fg:      "#F4F4F8",
   subtle:  "#8888A0",
@@ -344,7 +344,6 @@ function Vault({ fillPct, drops, ripples, onDropEnd, active }: {
       transition:"box-shadow 1.2s ease",
       backdropFilter:"blur(24px)",
     }}>
-      <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(255,255,255,0.06) 1px,transparent 0)", backgroundSize:"18px 18px" }}/>
       {[20,40,60,80].map(p=>(
         <div key={p} style={{ position:"absolute", right:0, bottom:`${p}%`, display:"flex", alignItems:"center" }}>
           <span style={{ fontSize:7, color:"rgba(255,255,255,0.18)", fontFamily:"var(--font-geist-mono)", paddingRight:6 }}>{p}</span>
@@ -460,7 +459,6 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
 
       {/* Visual area */}
       <div style={{ height:190, position:"relative", flexShrink:0, background:CGRADIENT[c.id]??CGRADIENT.c1, overflow:"hidden" }}>
-        <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(255,255,255,0.07) 1px,transparent 0)", backgroundSize:"18px 18px" }}/>
         <div className="noise-overlay-dark" style={{ position:"absolute", inset:0, opacity:0.4 }}/>
 
         {/* Corner labels */}
@@ -932,7 +930,6 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
       <div style={{ position:"absolute", left:"-20%", top:"8%", width:640, height:640, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)", animation:"drift 22s ease-in-out infinite", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", right:"-15%", top:"12%", width:560, height:560, borderRadius:"50%", background:"rgba(220,210,255,0.05)", filter:"blur(150px)", animation:"drift 26s ease-in-out infinite", animationDelay:"-9s", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", bottom:"-10%", left:"30%", width:500, height:500, borderRadius:"50%", background:"rgba(200,220,255,0.04)", filter:"blur(130px)", animation:"drift 30s ease-in-out infinite", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(255,255,255,0.07) 1px,transparent 0)", backgroundSize:"24px 24px", pointerEvents:"none" }}/>
 
       <div style={{ position:"relative", width:"100%", maxWidth:440, padding:"0 24px", textAlign:"center" }}>
         <motion.div initial={{ opacity:0, y:-20 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.7, ease }}>
@@ -1144,7 +1141,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
           <div className="animate-drift"       style={{ position:"absolute", left:"-18%", top:"5%",   width:700, height:700, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)" }}/>
           <div className="animate-drift-delay" style={{ position:"absolute", right:"-14%",top:"15%",  width:600, height:600, borderRadius:"50%", background:"rgba(180,180,200,0.04)", filter:"blur(140px)" }}/>
           <div className="animate-drift-slow"  style={{ position:"absolute", bottom:"-5%",left:"35%", width:480, height:480, borderRadius:"50%", background:"rgba(200,200,220,0.03)",  filter:"blur(130px)" }}/>
-          <div className="grid-dots-dark"       style={{ position:"absolute", inset:0 }}/>
+
           <div className="noise-overlay-dark"   style={{ position:"absolute", inset:0, opacity:0.35 }}/>
         </div>
 
