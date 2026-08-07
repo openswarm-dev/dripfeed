@@ -8,6 +8,7 @@ import {
   useEffect, useRef, useState, useCallback,
   createContext, useContext,
 } from "react";
+import type { CSSProperties } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { api } from "@/lib/api";
@@ -334,7 +335,7 @@ function Vault({ fillPct, drops, ripples, onDropEnd, active }: {
   onDropEnd:(id:string)=>void; active:boolean;
 }) {
   return (
-    <div className="neon-border" style={{
+    <div style={{
       position:"relative", width:VAULT_W, height:VAULT_H, borderRadius:28,
       background:"rgba(255,255,255,0.02)",
       overflow:"hidden",
@@ -432,6 +433,74 @@ function StatsStrip() {
   );
 }
 
+// ─── HoloCard — 3D tilt + specular light tracking ────────────────────────────
+function HoloCard({ children, style, className, borderRadius = 20 }: {
+  children: React.ReactNode;
+  style?: CSSProperties;
+  className?: string;
+  borderRadius?: number;
+}) {
+  const cardRef   = useRef<HTMLDivElement>(null);
+  const glowRef   = useRef<HTMLDivElement>(null);
+  const rotX      = useSpring(0, { stiffness: 260, damping: 28 });
+  const rotY      = useSpring(0, { stiffness: 260, damping: 28 });
+  const scale     = useSpring(1, { stiffness: 280, damping: 28 });
+
+  function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
+    const el   = cardRef.current!;
+    const rect = el.getBoundingClientRect();
+    const nx   = (e.clientX - rect.left)  / rect.width;   // 0→1
+    const ny   = (e.clientY - rect.top)   / rect.height;  // 0→1
+    // Tilt: max ±10°
+    rotX.set((ny - 0.5) * -18);
+    rotY.set((nx - 0.5) *  18);
+    scale.set(1.025);
+    // Specular highlight follows cursor
+    if (glowRef.current) {
+      glowRef.current.style.background =
+        `radial-gradient(circle at ${nx*100}% ${ny*100}%, rgba(255,255,255,0.14) 0%, transparent 65%)`;
+    }
+  }
+
+  function onMouseLeave() {
+    rotX.set(0); rotY.set(0); scale.set(1);
+    if (glowRef.current) glowRef.current.style.background = "none";
+  }
+
+  return (
+    <div style={{ perspective: 900 }}>
+      <motion.div
+        ref={cardRef}
+        className={`neon-border ${className ?? ""}`}
+        onMouseMove={onMouseMove}
+        onMouseLeave={onMouseLeave}
+        style={{
+          rotateX: rotX,
+          rotateY: rotY,
+          scale,
+          transformStyle: "preserve-3d",
+          willChange: "transform",
+          borderRadius,
+          ...style,
+        }}
+      >
+        {children}
+        {/* Specular highlight layer */}
+        <div ref={glowRef} style={{
+          position: "absolute", inset: 0, borderRadius,
+          pointerEvents: "none", zIndex: 10, transition: "background 0.05s",
+        }}/>
+        {/* Edge sheen (top-left corner light) */}
+        <div style={{
+          position: "absolute", inset: 0, borderRadius,
+          background: "linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%)",
+          pointerEvents: "none", zIndex: 9,
+        }}/>
+      </motion.div>
+    </div>
+  );
+}
+
 // ─── Campaign card ────────────────────────────────────────────────────────────
 function CampaignCard({ c, joined, onToggle, earning, index }: {
   c:Campaign; joined:boolean; onToggle:()=>void; earning:boolean; index:number;
@@ -445,15 +514,13 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
     <motion.div ref={ref}
       initial={{ opacity:0, y:32 }}
       animate={inView ? { opacity:1, y:0 } : {}}
-      transition={{ duration:0.65, ease, delay:(index%3)*0.1 }}
-      style={{
-        borderRadius:20, overflow:"hidden",
+      transition={{ duration:0.65, ease, delay:(index%3)*0.1 }}>
+    <HoloCard borderRadius={20} style={{
+        overflow:"hidden",
         background:T.surface,
-        border:`1px solid ${joined?"rgba(255,255,255,0.22)":T.border}`,
         boxShadow: joined
-          ? "0 8px 40px -12px rgba(255,255,255,0.15), 0 0 0 1px rgba(255,255,255,0.06)"
-          : "0 4px 24px -8px rgba(0,0,0,0.6)",
-        transition:"border-color 0.4s, box-shadow 0.4s",
+          ? "0 8px 40px -12px rgba(255,255,255,0.15), 0 20px 60px rgba(0,0,0,0.5)"
+          : "0 4px 24px -8px rgba(0,0,0,0.6), 0 20px 60px rgba(0,0,0,0.4)",
         display:"flex", flexDirection:"column",
       }}>
 
@@ -547,6 +614,7 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
           {joined?"✓ Joined":"+ Join Campaign"}
         </button>
       </div>
+    </HoloCard>
     </motion.div>
   );
 }
@@ -946,8 +1014,8 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
           </motion.div>
         )}
 
-        <motion.div initial={{ opacity:0, y:24 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.7, ease, delay:0.15 }}
-          style={{ background:T.surface, border:`1px solid ${T.border}`, borderRadius:22, overflow:"hidden", boxShadow:"0 40px 80px -20px rgba(0,0,0,0.55)", marginBottom:18 }}>
+        <motion.div initial={{ opacity:0, y:24 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.7, ease, delay:0.15 }} style={{ marginBottom:18 }}>
+          <HoloCard borderRadius={22} style={{ background:T.surface, overflow:"hidden", boxShadow:"0 40px 80px -20px rgba(0,0,0,0.6)" }}>
           <div className="rainbow-bg" style={{ height:2 }}/>
           <div style={{ padding:22, display:"flex", flexDirection:"column", gap:8 }}>
 
@@ -982,6 +1050,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
               {wDone && <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ {publicKey!.toString().slice(0,6)}…{publicKey!.toString().slice(-4)}</span>}
             </div>
           </div>
+          </HoloCard>
         </motion.div>
 
         <motion.p initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:0.4 }}
@@ -1169,7 +1238,9 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
               pointerEvents:"none", transition:"background 1.5s ease",
             }}/>
               <div className="vault-scale-wrapper">
-              <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
+              <HoloCard borderRadius={28} style={{ display:"inline-block" }}>
+                <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
+              </HoloCard>
             </div>
           </motion.div>
 
