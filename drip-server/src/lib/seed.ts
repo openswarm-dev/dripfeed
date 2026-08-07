@@ -8,18 +8,5 @@ const CAMPAIGNS = [
 ];
 
 export async function seedCampaigns() {
-  const count = await prisma.campaign.count();
-  if (count > 0) return; // Already seeded
-
-  await prisma.campaign.createMany({
-    data: CAMPAIGNS.map(c => ({
-      ...c,
-      budgetTotal: c.budgetTotal,
-      budgetLeft: c.budgetLeft,
-      participants: 0,
-      active: true,
-    })),
-    skipDuplicates: true,
-  });
-  console.log('[Seed] Campaigns inserted');
+  // Seeding disabled — campaigns are created by project owners via the platform
 }

@@ -15,6 +15,7 @@ import { campaignsRouter } from './routes/campaigns';
 import { postsRouter }     from './routes/posts';
 import { vaultRouter }     from './routes/vault';
 import { claimsRouter }    from './routes/claims';
+import { feedRouter }      from './routes/feed';
 import { startRewardEngine } from './services/rewards';
 import { seedCampaigns }   from './lib/seed';
 import { prisma }          from './lib/prisma';
@@ -39,6 +40,7 @@ app.use('/api/campaigns', campaignsRouter);
 app.use('/api/posts',     postsRouter);
 app.use('/api/vault',     vaultRouter);
 app.use('/api/claims',    claimsRouter);
+app.use('/api/feed',      feedRouter);
 
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 

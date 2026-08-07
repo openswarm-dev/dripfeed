@@ -36,20 +36,9 @@ type ClaimState = "idle" | "signing" | "submitting" | "confirmed";
 interface Drop   { id: string; x: number; size: number; duration: number; score: number }
 interface Ripple { id: string; x: number }
 interface Campaign  { id: string; project: string; av: string; budgetTotal: number; budgetLeft: number; goal: number; verified: number; rateLabel: string; dripHr: number; participants: number }
-interface FeedEntry { id: string; handle: string; amount: string; campaign: string; ts: number }
+interface FeedEntry { id: string; handle: string; pfp: string; campaign: string; earned: string; impressions: number; tweetUrl: string; submittedAt: string }
 interface Post      { id: string; snippet: string; campaign: string; impressions: number; dripHr: number }
 
-// ─── Mock data ────────────────────────────────────────────────────────────────
-const CAMPAIGNS: Campaign[] = [
-  { id:"c1", project:"Solana Foundation", av:"SF", budgetTotal:20000, budgetLeft:14230, goal:10_000_000, verified:6_421_000, rateLabel:"100K views → $1", dripHr:3.2, participants:847 },
-  { id:"c2", project:"Jupiter Exchange",  av:"JX", budgetTotal:8000,  budgetLeft:7100,  goal:5_000_000,  verified:890_000,   rateLabel:"80K views → $1",  dripHr:0.9, participants:312 },
-  { id:"c3", project:"Pyth Network",      av:"PY", budgetTotal:15000, budgetLeft:12800, goal:8_000_000,  verified:3_200_000, rateLabel:"120K views → $1", dripHr:1.8, participants:524 },
-];
-const HANDLES = ["@sol_builder","@defi_degen","@web3creator","@crypto_art","@buildoor","@nft_trader","@sol_maxi","@founder_vibes","@wagmi_dev","@wen_moon","@solana_dev","@pumping_eth"];
-const CNAMES  = ["Solana Foundation","Jupiter Exchange","Pyth Network"];
-const INIT_POSTS: Post[] = [
-  { id:"p1", snippet:"Why Solana's validator count matters for decentralisation...", campaign:"Solana Foundation", impressions:24_300, dripHr:3.2 },
-];
 
 // Campaign visual gradients (portrait card "image" area)
 const CGRADIENT: Record<string,string> = {
@@ -400,8 +389,9 @@ function Reveal({ children, delay=0, className }: { children:React.ReactNode; de
 }
 
 // ─── Ticker marquee ───────────────────────────────────────────────────────────
+const TICKER_ITEMS = ["DRIP","Earn","Post","Claim","Grow","Web3","Creators","Solana"];
 function Ticker() {
-  const doubled = [...CNAMES,...CNAMES,...CNAMES,...CNAMES,...CNAMES,...CNAMES,...CNAMES,...CNAMES];
+  const doubled = [...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS];
   return (
     <div style={{ display:"flex", alignItems:"center", height:"100%", overflow:"hidden", paddingLeft:28 }}>
       <div className="ticker-track" style={{ display:"flex", gap:56, whiteSpace:"nowrap", flexShrink:0 }}>
@@ -420,9 +410,9 @@ function Ticker() {
 function StatsStrip() {
   const { show:showTip, hide:hideTip } = useTip();
   const stats = [
-    { lbl:"Creators earning",    val:"847+",  tip:"Active creators currently earning across all campaigns" },
-    { lbl:"Active campaigns",    val:"3",     tip:"Projects funding creator campaigns right now" },
-    { lbl:"Verified impressions",val:"14.2M", tip:"Total impressions verified across all submitted posts" },
+    { lbl:"Creators earning",    val:"—",  tip:"Active creators currently earning across all campaigns" },
+    { lbl:"Active campaigns",    val:"—",  tip:"Projects funding creator campaigns right now" },
+    { lbl:"Verified impressions",val:"—",  tip:"Total impressions verified across all submitted posts" },
     { lbl:"DRIP price",          val:"$1.50", tip:"Current market price of $DRIP token on Solana" },
   ];
   return (
@@ -582,26 +572,39 @@ function PostCard({ post }: { post:Post }) {
 
 // ─── Community feed ───────────────────────────────────────────────────────────
 function CommunityFeed() {
-  const [items, setItems] = useState<FeedEntry[]>(()=>
-    Array.from({length:8},(_,i)=>({ id:String(i), ts:Date.now()-i*11000, handle:HANDLES[i%HANDLES.length], amount:rnd(0.05,2.8).toFixed(2), campaign:CNAMES[i%3] }))
-  );
-  useEffect(()=>{
-    let t: ReturnType<typeof setTimeout>;
-    function next() {
-      t = setTimeout(()=>{
-        setItems(prev=>[{
-          id:uid(), ts:Date.now(),
-          handle:HANDLES[Math.floor(Math.random()*HANDLES.length)],
-          amount:rnd(0.04,2.6).toFixed(2),
-          campaign:CNAMES[Math.floor(Math.random()*3)],
-        },...prev.slice(0,9)]);
-        next();
-      }, rnd(2200,5200));
-    }
-    next(); return ()=>clearTimeout(t);
-  },[]);
+  const [items, setItems] = useState<FeedEntry[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const age = (ts:number) => { const s=Math.floor((Date.now()-ts)/1000); return s<60?`${s}s`:`${Math.floor(s/60)}m`; };
+  useEffect(() => {
+    const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+    async function load() {
+      try {
+        const res = await fetch(`${BASE}/api/feed`);
+        if (!res.ok) throw new Error();
+        const data = await res.json() as { feed: FeedEntry[] };
+        setItems(data.feed ?? []);
+      } catch { /* stay empty */ }
+      finally { setLoading(false); }
+    }
+    load();
+    const interval = setInterval(load, 30_000); // refresh every 30s
+    return () => clearInterval(interval);
+  }, []);
+
+  const age = (iso: string) => {
+    const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s/60)}m` : `${Math.floor(s/3600)}h`;
+  };
+
+  if (loading) return (
+    <div style={{ textAlign:"center", padding:"32px 0", color:T.faint, fontSize:13 }}>Loading activity…</div>
+  );
+
+  if (items.length === 0) return (
+    <div style={{ textAlign:"center", padding:"40px 0", color:T.faint, fontSize:13 }}>
+      No activity yet. Be the first to submit a post and start earning.
+    </div>
+  );
 
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
@@ -612,11 +615,15 @@ function CommunityFeed() {
             exit={{ opacity:0, height:0 }} transition={{ duration:0.3, ease }}
             style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 16px", borderRadius:11, background:T.el, border:`1px solid ${T.border}`, overflow:"hidden" }}>
             <div style={{ width:5, height:5, borderRadius:"50%", background:T.faint, flexShrink:0 }}/>
-            <span className="rainbow-text" style={{ fontFamily:"var(--font-geist-mono)", fontWeight:700, flexShrink:0, fontSize:12 }}>{item.handle}</span>
-            <span style={{ color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600, fontSize:12 }}>+{item.amount}</span>
+            <a href={item.tweetUrl} target="_blank" rel="noopener noreferrer"
+              className="rainbow-text"
+              style={{ fontFamily:"var(--font-geist-mono)", fontWeight:700, flexShrink:0, fontSize:12, textDecoration:"none" }}>
+              @{item.handle}
+            </a>
+            <span style={{ color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600, fontSize:12 }}>+{Number(item.earned).toFixed(4)}</span>
             <span style={{ color:T.faint, fontSize:11, flexShrink:0 }}>DRIP</span>
             <span style={{ color:T.faint, fontSize:11, flex:1, textOverflow:"ellipsis", overflow:"hidden", whiteSpace:"nowrap" }}>{item.campaign}</span>
-            <span style={{ color:T.faint, fontSize:10, fontFamily:"var(--font-geist-mono)", flexShrink:0 }}>{age(item.ts)}</span>
+            <span style={{ color:T.faint, fontSize:10, fontFamily:"var(--font-geist-mono)", flexShrink:0 }}>{age(item.submittedAt)}</span>
           </motion.div>
         ))}
       </AnimatePresence>
@@ -781,8 +788,8 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
 }
 
 // ─── Nav ──────────────────────────────────────────────────────────────────────
-function Nav({ claimable, fillPct, onClaim, onSubmit, walletAddress, twitterHandle }: {
-  claimable:number; fillPct:number; onClaim:()=>void; onSubmit:()=>void;
+function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, twitterHandle }: {
+  claimable:number; fillPct:number; onClaim:()=>void; onSubmit:()=>void; onLogout:()=>void;
   walletAddress:string; twitterHandle:string;
 }) {
   const [scrolled, setScrolled] = useState(false);
@@ -848,6 +855,15 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, walletAddress, twitterHand
               onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color=T.fg; (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
               onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
               <span style={{ fontSize:15, lineHeight:1 }}>+</span> Post
+            </button>
+
+            <button onClick={onLogout} data-cursor-hover title="Log out"
+              style={{ height:34, width:34, borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
+              onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color="#ff5555"; (e.currentTarget as HTMLElement).style.borderColor="#ff5555"; }}
+              onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+              </svg>
             </button>
 
             <AnimatePresence>
@@ -1008,15 +1024,15 @@ function Cursor() {
 }
 
 // ─── Main app ─────────────────────────────────────────────────────────────────
-function DripApp({ walletAddress, twitterHandle, authToken }: { walletAddress: string; twitterHandle: string; authToken: string }) {
+function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { walletAddress: string; twitterHandle: string; authToken: string; onLogout: () => void }) {
   const [balance,   setBalance]   = useState(0);
   const [claimable, setClaimable] = useState(0);
   const [fillPct,   setFillPct]   = useState(0);
   const [drops,     setDrops]     = useState<Drop[]>([]);
   const [ripples,   setRipples]   = useState<Ripple[]>([]);
-  const [joined,    setJoined]    = useState(new Set(["c1"]));
+  const [joined,    setJoined]    = useState(new Set<string>());
   const [posts,     setPosts]     = useState<Post[]>([]);
-  const [campaigns, setCampaigns] = useState<Campaign[]>(CAMPAIGNS);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showClaim, setShowClaim] = useState(false);
   const [showPost,  setShowPost]  = useState(false);
 
@@ -1116,7 +1132,7 @@ function DripApp({ walletAddress, twitterHandle, authToken }: { walletAddress: s
 
   return (
     <>
-      <Nav claimable={claimable} fillPct={fillPct} onClaim={()=>setShowClaim(true)} onSubmit={()=>setShowPost(true)} walletAddress={walletAddress} twitterHandle={twitterHandle}/>
+      <Nav claimable={claimable} fillPct={fillPct} onClaim={()=>setShowClaim(true)} onSubmit={()=>setShowPost(true)} onLogout={onLogout} walletAddress={walletAddress} twitterHandle={twitterHandle}/>
 
       {/* ════ HERO ════ */}
       <section ref={heroRef} id="vault" style={{ minHeight:"100vh", position:"relative", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", paddingTop:60, paddingBottom:44, overflow:"hidden" }}>
@@ -1335,6 +1351,14 @@ export default function Page() {
     setScreen("app");
   }
 
+  function handleLogout() {
+    localStorage.removeItem("drip_token");
+    localStorage.removeItem("drip_handle");
+    setAuthToken("");
+    setTwitterHandle("");
+    setScreen("landing");
+  }
+
   return (
     <TipProvider>
       <div style={{ background:T.bg, color:T.fg, minHeight:"100vh" }}>
@@ -1343,7 +1367,7 @@ export default function Page() {
           {screen==="landing"
             ? <Landing key="landing" onDone={handleLandingDone}/>
             : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.5 }}>
-                <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken}/>
+                <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken} onLogout={handleLogout}/>
               </motion.div>
           }
         </AnimatePresence>
