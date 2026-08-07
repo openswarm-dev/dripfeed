@@ -10,9 +10,10 @@ import {
 } from "react";
 import type { CSSProperties } from "react"; // used by HoloCard
 import { useWallet } from "@solana/wallet-adapter-react";
-import { useWalletModal } from "@solana/wallet-adapter-react-ui";
+import WalletSelectModal from "@/components/WalletSelectModal";
 import { api } from "@/lib/api";
 import type { Campaign as APICampaign, Post as APIPost, Vault as APIVault } from "@/lib/api";
+import Image from "next/image";
 
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
@@ -651,10 +652,123 @@ function CommunityFeed() {
   );
 }
 
+// ─── Create campaign modal ────────────────────────────────────────────────────
+function CreateCampaignModal({ authToken, onClose, onSuccess }: {
+  authToken: string;
+  onClose: () => void;
+  onSuccess: (c: Campaign) => void;
+}) {
+  const [project,       setProject]       = useState("");
+  const [logo,          setLogo]          = useState("");
+  const [budget,        setBudget]        = useState("");
+  const [goal,          setGoal]          = useState("");
+  const [dripPerK,      setDripPerK]      = useState("0.01");
+  const [state,         setState]         = useState<"idle"|"saving"|"done"|"error">("idle");
+  const [errMsg,        setErrMsg]        = useState("");
+
+  const kPerDrip = dripPerK && +dripPerK > 0 ? Math.round(1 / +dripPerK) : 0;
+
+  async function save() {
+    if (!project.trim()||!logo.trim()||!budget||!goal||!dripPerK) return;
+    setState("saving"); setErrMsg("");
+    try {
+      const res = await api.createCampaign({
+        project: project.trim(),
+        logo: logo.trim(),
+        budgetTotal: +budget,
+        goal: +goal,
+        dripPerKViews: +dripPerK,
+      }, authToken);
+      // Map to local Campaign shape
+      const c = res.campaign;
+      onSuccess({
+        id: c.id, project: c.project, av: c.logo,
+        budgetTotal: +c.budgetTotal, budgetLeft: +c.budgetLeft,
+        goal: +c.goal, verified: +c.verified,
+        rateLabel: c.rateLabel, dripHr: +c.dripPerKViews * 100,
+        participants: c.participants,
+      } as unknown as Campaign);
+    } catch (err) {
+      setErrMsg((err as Error).message);
+      setState("error");
+    }
+  }
+
+  const field = (label: string, value: string, onChange: (v:string)=>void, opts?: { placeholder?: string; type?: string; hint?: string }) => (
+    <div style={{ marginBottom:14 }}>
+      <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>
+        {label}{opts?.hint && <span style={{ marginLeft:8, textTransform:"none", letterSpacing:0, fontFamily:"inherit", color:T.faint, fontSize:10 }}>{opts.hint}</span>}
+      </label>
+      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={opts?.placeholder} type={opts?.type ?? "text"}
+        style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"inherit" }}
+        onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
+        onBlur={e=>(e.target.style.borderColor=T.border)}/>
+    </div>
+  );
+
+  return (
+    <motion.div className="fixed inset-0 z-50 flex items-center justify-center"
+      initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+      style={{ background:"rgba(15,17,19,0.92)", backdropFilter:"blur(20px)", padding:"0 16px" }}
+      onClick={e=>e.target===e.currentTarget&&state==="idle"&&onClose()}>
+      <motion.div initial={{ opacity:0, scale:0.95, y:16 }} animate={{ opacity:1, scale:1, y:0 }}
+        exit={{ opacity:0, scale:0.95, y:16 }} transition={{ duration:0.3, ease }}
+        style={{ width:"100%", maxWidth:460, background:T.surface, border:`1px solid ${T.border}`, borderRadius:22, overflow:"hidden", boxShadow:"0 40px 80px -20px rgba(0,0,0,0.7)" }}>
+        <div className="rainbow-bg" style={{ height:2 }}/>
+        <div style={{ padding:26 }}>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
+            <div>
+              <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Create Campaign</p>
+              <p style={{ fontSize:12, color:T.subtle, marginTop:4 }}>Set up a new creator rewards campaign</p>
+            </div>
+            <button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", fontSize:20, lineHeight:1, padding:4 }}>×</button>
+          </div>
+
+          {errMsg && (
+            <motion.div initial={{ opacity:0, y:-6 }} animate={{ opacity:1, y:0 }}
+              style={{ background:"rgba(255,80,80,0.08)", border:"1px solid rgba(255,80,80,0.2)", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
+              <p style={{ fontSize:12, color:"#ff7070" }}>{errMsg}</p>
+            </motion.div>
+          )}
+
+          {field("Project name", project, setProject, { placeholder:"e.g. Solana Foundation" })}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>Ticker</label>
+              <input value={logo} onChange={e=>setLogo(e.target.value.toUpperCase().slice(0,6))} placeholder="SOL"
+                style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"var(--font-geist-mono)", letterSpacing:"0.06em" }}
+                onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
+                onBlur={e=>(e.target.style.borderColor=T.border)}/>
+            </div>
+            {field("Budget (DRIP)", budget, setBudget, { placeholder:"10000", type:"number" })}
+          </div>
+          {field("Impression goal", goal, setGoal, { placeholder:"5000000", type:"number", hint:"total views target" })}
+          <div style={{ marginBottom:22 }}>
+            <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>
+              DRIP per 1K views
+              {kPerDrip>0 && <span style={{ marginLeft:8, textTransform:"none", letterSpacing:0, color:"rgba(255,255,255,0.5)", fontSize:10, fontFamily:"inherit" }}>→ {kPerDrip}K views = 1 DRIP</span>}
+            </label>
+            <input value={dripPerK} onChange={e=>setDripPerK(e.target.value)} type="number" step="0.001" min="0.001" placeholder="0.01"
+              style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"var(--font-geist-mono)" }}
+              onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
+              onBlur={e=>(e.target.style.borderColor=T.border)}/>
+          </div>
+
+          <button onClick={save} disabled={state==="saving"||!project.trim()||!logo.trim()||!budget||!goal||!dripPerK} data-cursor-hover
+            className={state!=="saving"&&project.trim()&&logo.trim()&&budget&&goal&&dripPerK?"rainbow-bg":""}
+            style={{ width:"100%", height:48, borderRadius:12, border:"none", background:state==="saving"||!project.trim()?"rgba(255,255,255,0.05)":undefined, color:(state!=="saving"&&project.trim()&&logo.trim()&&budget&&goal&&dripPerK)?"#111":"rgba(255,255,255,0.3)", fontWeight:700, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
+            {state==="saving"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Creating…</>):"Launch Campaign"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  );
+}
+
 // ─── Submit modal ─────────────────────────────────────────────────────────────
-function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose, onSuccess }: {
+function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, authToken, onClose, onSuccess }: {
   joined:string[]; campaigns:Campaign[];
-  walletAddress:string; twitterHandle:string;
+  walletAddress:string; twitterHandle:string; authToken:string;
   onClose:()=>void; onSuccess:(p:Post)=>void;
 }) {
   const [url,      setUrl]      = useState("");
@@ -672,7 +786,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose,
     setState("verifying");
     setErrMsg("");
     try {
-      const res = await api.submitPost({ walletAddress, twitterHandle, tweetUrl: url.trim(), campaignId: campaign });
+      const res = await api.submitPost({ tweetUrl: url.trim(), campaignId: campaign, token: authToken });
       const c = campaigns.find(c=>c.id===campaign);
       onSuccess({
         id: res.post.id,
@@ -733,7 +847,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose,
               </div>
               <button onClick={submit} disabled={!url.trim()||state==="verifying"} data-cursor-hover
                 className={url.trim()&&state!=="verifying"?"rainbow-bg":""}
-                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
+                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:url.trim()&&state!=="verifying"?"#111":"#fff", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
                 {state==="verifying"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Verifying on X…</>):state==="error"?"Try Again":"Verify & Submit"}
               </button>
             </>
@@ -794,7 +908,7 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
               </div>
               <button onClick={sign} disabled={state!=="idle"} data-cursor-hover
                 className={state==="idle"?"rainbow-bg":""}
-                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
+                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:state==="idle"?"#111":"#fff", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
                 {state==="idle"&&"Sign & Claim"}
                 {state==="signing"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Signing...</>}
                 {state==="submitting"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Submitting to Solana...</>}
@@ -836,7 +950,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
 
           {/* Logo */}
           <a href="#vault" data-cursor-hover style={{ display:"flex", alignItems:"center", gap:8, textDecoration:"none" }}>
-            <span className="rainbow-text" style={{ fontSize:20, fontWeight:800, letterSpacing:"-0.04em" }}>DRIP</span>
+            <Image src="/logos/DripLogo.png" alt="DRIP" width={52} height={40} style={{ objectFit:"contain" }}/>
             <span style={{ fontSize:9, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, border:`1px solid ${T.border}`, borderRadius:4, padding:"2px 6px", letterSpacing:"0.1em", textTransform:"uppercase" }}>beta</span>
           </a>
 
@@ -892,7 +1006,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
                   initial={{ opacity:0, scale:0.88 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.88 }}
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   className="rainbow-bg"
-                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
+                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#111", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
                   Claim {fmt(claimable,0)} DRIP
                 </motion.button>
               )}
@@ -907,7 +1021,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
 // ─── Landing ──────────────────────────────────────────────────────────────────
 function Landing({ onDone }: { onDone: (handle: string, token: string) => void }) {
   const { publicKey, connected } = useWallet();
-  const { setVisible } = useWalletModal();
+  const [showWalletModal, setShowWalletModal] = useState(false);
 
   // Parse ?token=...&handle=... from URL after X OAuth callback
   const [xToken,   setXToken]   = useState("");
@@ -928,12 +1042,12 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
   // After wallet connects (and X is authed), enter app
   useEffect(() => {
     if (connected && publicKey && xToken && xHandle) {
-      // Link wallet to account on server
+      // Link wallet to account on server (best-effort — onDone fires regardless)
       fetch(`${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/wallet`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${xToken}` },
         body: JSON.stringify({ walletAddress: publicKey.toString() }),
-      }).finally(() => onDone(xHandle, xToken));
+      }).catch(() => {}).finally(() => onDone(xHandle, xToken));
     }
   }, [connected, publicKey, xToken, xHandle, onDone]);
 
@@ -949,15 +1063,26 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
   return (
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
       style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:T.bg }}>
-      <div style={{ position:"absolute", left:"-20%", top:"8%", width:640, height:640, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)", animation:"drift 22s ease-in-out infinite", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", right:"-15%", top:"12%", width:560, height:560, borderRadius:"50%", background:"rgba(220,210,255,0.05)", filter:"blur(150px)", animation:"drift 26s ease-in-out infinite", animationDelay:"-9s", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", bottom:"-10%", left:"30%", width:500, height:500, borderRadius:"50%", background:"rgba(200,220,255,0.04)", filter:"blur(130px)", animation:"drift 30s ease-in-out infinite", pointerEvents:"none" }}/>
 
       <div style={{ position:"relative", width:"100%", maxWidth:440, padding:"0 24px", textAlign:"center" }}>
         <motion.div initial={{ opacity:0, y:-20 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.7, ease }}>
-          <p className="rainbow-text" style={{ fontSize:"clamp(4rem,15vw,6rem)", fontWeight:800, letterSpacing:"-0.045em", lineHeight:0.9 }}>DRIP</p>
-          <p style={{ fontSize:15, color:T.subtle, marginTop:16, marginBottom:48, lineHeight:1.7 }}>
-            Earn $DRIP for the attention<br/>you generate on X.
+          {/* Floating logo */}
+          <motion.div
+            animate={{ y: [0, -10, 0, -6, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut", times: [0, 0.3, 0.55, 0.75, 1] }}
+            style={{ display:"inline-block", marginBottom: 8 }}
+          >
+            <Image
+              src="/logos/DripLogo.png"
+              alt="DRIP"
+              width={380}
+              height={300}
+              priority
+              style={{ objectFit:"contain", filter:"drop-shadow(0 8px 40px rgba(200,200,255,0.18))" }}
+            />
+          </motion.div>
+          <p style={{ fontSize:15, color:T.subtle, marginTop:4, marginBottom:36, lineHeight:1.6, whiteSpace:"nowrap" }}>
+            Earn $DRIP for the attention you generate on X.
           </p>
         </motion.div>
 
@@ -982,7 +1107,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
               {xDone
                 ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{xHandle}</span>
                 : <button data-cursor-hover onClick={signInWithX} className="rainbow-bg"
-                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                     Connect
                   </button>
               }
@@ -996,8 +1121,8 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
               </div>
               {!xDone && <span style={{ fontSize:11, color:T.faint }}>Sign in with X first</span>}
               {xDone && !wDone && (
-                <button data-cursor-hover onClick={() => setVisible(true)} className="rainbow-bg"
-                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                <button data-cursor-hover onClick={() => setShowWalletModal(true)} className="rainbow-bg"
+                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                   Connect
                 </button>
               )}
@@ -1012,6 +1137,8 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
           Your keys. Your vault. Non-custodial.
         </motion.p>
       </div>
+
+      <WalletSelectModal open={showWalletModal} onClose={() => setShowWalletModal(false)}/>
     </motion.div>
   );
 }
@@ -1057,6 +1184,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [showClaim, setShowClaim] = useState(false);
   const [showPost,  setShowPost]  = useState(false);
+  const [showCreateCampaign, setShowCreateCampaign] = useState(false);
 
   // Load real vault + campaigns from API on mount
   useEffect(() => {
@@ -1156,101 +1284,130 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
     <>
       <Nav claimable={claimable} fillPct={fillPct} onClaim={()=>setShowClaim(true)} onSubmit={()=>setShowPost(true)} onLogout={onLogout} walletAddress={walletAddress} twitterHandle={twitterHandle}/>
 
-      {/* ════ HERO ════ */}
-      <section ref={heroRef} id="vault" style={{ minHeight:"100vh", position:"relative", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", paddingTop:60, paddingBottom:44, overflow:"hidden" }}>
+      {/* ════ HERO — two-panel: vault left, stats right ════ */}
+      <section ref={heroRef} id="vault" style={{ minHeight:"100vh", position:"relative", display:"flex", flexDirection:"column", justifyContent:"center", paddingTop:72, paddingBottom:44, overflow:"hidden" }}>
 
         {/* Ambient bg */}
         <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}>
           <div className="animate-drift"       style={{ position:"absolute", left:"-18%", top:"5%",   width:700, height:700, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)" }}/>
           <div className="animate-drift-delay" style={{ position:"absolute", right:"-14%",top:"15%",  width:600, height:600, borderRadius:"50%", background:"rgba(180,180,200,0.04)", filter:"blur(140px)" }}/>
           <div className="animate-drift-slow"  style={{ position:"absolute", bottom:"-5%",left:"35%", width:480, height:480, borderRadius:"50%", background:"rgba(200,200,220,0.03)",  filter:"blur(130px)" }}/>
-
-          <div className="noise-overlay-dark"   style={{ position:"absolute", inset:0, opacity:0.35 }}/>
+          <div className="noise-overlay-dark" style={{ position:"absolute", inset:0, opacity:0.35 }}/>
         </div>
 
-        {/* Parallax content */}
-        <motion.div style={{ y:heroY, opacity:heroOpacity, position:"relative", zIndex:1, display:"flex", flexDirection:"column", alignItems:"center", textAlign:"center", padding:"0 24px", flex:1, justifyContent:"center" }}>
+        <motion.div style={{ y:heroY, opacity:heroOpacity, position:"relative", zIndex:1, flex:1, display:"flex", alignItems:"center" }}>
+          <div style={{ width:"100%", maxWidth:1200, margin:"0 auto", padding:"0 24px", display:"grid", gridTemplateColumns:"1fr 1fr", gap:48, alignItems:"center" }} className="hero-grid">
 
-          {/* Live badge */}
-          <motion.div initial={{ opacity:0, y:-12 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.6, ease, delay:0.1 }} style={{ marginBottom:32 }}>
-            <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"7px 16px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)" }}>
-              <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
-                <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.5 }}/>
-                <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
-              </span>
-              <span style={{ fontSize:12, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>{campaigns.length} campaigns live</span>
-            </div>
-          </motion.div>
+            {/* ── Left: Vault ── */}
+            <motion.div initial={{ opacity:0, x:-30 }} animate={{ opacity:1, x:0 }} transition={{ duration:0.8, ease }} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:24 }}>
+              {/* Live badge */}
+              <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"6px 14px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)", alignSelf:"center" }}>
+                <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
+                  <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.5 }}/>
+                  <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
+                </span>
+                <span style={{ fontSize:11, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>{campaigns.length} campaigns live</span>
+              </div>
 
-          {/* Vault */}
-          <motion.div initial={{ opacity:0, scale:0.93 }} animate={{ opacity:1, scale:1 }} transition={{ duration:0.8, ease, delay:0.15 }} style={{ marginBottom:32, position:"relative" }}>
-            <div className="animate-drift-slow" style={{
-              position:"absolute", width:400, height:400, borderRadius:"50%",
-              background:`rgba(255,255,255,${active?0.07:0.025})`,
-              filter:"blur(90px)", left:"50%", top:"50%",
-              transform:"translate(-50%,-50%)",
-              pointerEvents:"none", transition:"background 1.5s ease",
-            }}/>
-              <div className="vault-scale-wrapper">
-              <HoloCard borderRadius={28} style={{ display:"inline-block" }}>
-                <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
-              </HoloCard>
-            </div>
-          </motion.div>
+              {/* Vault widget */}
+              <div style={{ position:"relative" }}>
+                <div className="animate-drift-slow" style={{
+                  position:"absolute", width:380, height:380, borderRadius:"50%",
+                  background:`rgba(255,255,255,${active?0.07:0.025})`,
+                  filter:"blur(90px)", left:"50%", top:"50%",
+                  transform:"translate(-50%,-50%)",
+                  pointerEvents:"none", transition:"background 1.5s ease",
+                }}/>
+                <div className="vault-scale-wrapper">
+                  <HoloCard borderRadius={28} style={{ display:"inline-block" }}>
+                    <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
+                  </HoloCard>
+                </div>
+              </div>
+            </motion.div>
 
-          {/* Balance */}
-          <motion.div initial={{ opacity:0, y:16 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.6, ease, delay:0.3 }} style={{ marginBottom:10 }}>
-            <div style={{ lineHeight:1, marginBottom:6 }}>
-              <span className="rainbow-text" style={{ fontSize:"clamp(3.4rem,8vw,5.5rem)", fontWeight:800, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.04em" }}>
-                <AnimNum value={balance} d={2}/>
-              </span>
-              <span style={{ fontSize:18, color:T.faint, fontFamily:"var(--font-geist-mono)", marginLeft:12 }}>DRIP</span>
-            </div>
-            <p style={{ fontSize:14, color:T.subtle }}>≈ ${fmt(balance*DRIP_PRICE)} USD</p>
-          </motion.div>
+            {/* ── Right: Stats + CTAs ── */}
+            <motion.div initial={{ opacity:0, x:30 }} animate={{ opacity:1, x:0 }} transition={{ duration:0.8, ease, delay:0.1 }} style={{ display:"flex", flexDirection:"column", gap:28 }}>
 
-          {/* Rate badge */}
-          <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.6, ease, delay:0.4 }} style={{ marginBottom:28 }}>
-            <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"7px 18px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)" }}>
-              {active?(
-                <>
-                  <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
-                    <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.55 }}/>
-                    <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
+              {/* Balance */}
+              <div>
+                <p style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint, marginBottom:10 }}>Your Vault</p>
+                <div style={{ lineHeight:1, marginBottom:8 }}>
+                  <span className="rainbow-text" style={{ fontSize:"clamp(2.8rem,5.5vw,4.5rem)", fontWeight:800, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.04em" }}>
+                    <AnimNum value={balance} d={2}/>
                   </span>
-                  <span className="rainbow-text" style={{ fontSize:13, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>
-                    +{fmt(totalRate,1)} DRIP/hr — {joined.size} {joined.size===1?"campaign":"campaigns"} active
-                  </span>
-                </>
-              ):(
-                <span style={{ fontSize:13, fontFamily:"var(--font-geist-mono)", color:T.faint }}>Join a campaign below to start earning</span>
-              )}
-            </div>
-          </motion.div>
+                  <span style={{ fontSize:16, color:T.faint, fontFamily:"var(--font-geist-mono)", marginLeft:10 }}>DRIP</span>
+                </div>
+                <p style={{ fontSize:14, color:T.subtle }}>≈ ${fmt(balance*DRIP_PRICE)} USD</p>
+              </div>
 
-          {/* CTAs */}
-          <motion.div initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }} transition={{ duration:0.6, ease, delay:0.5 }}
-            style={{ display:"flex", gap:10, flexWrap:"wrap", justifyContent:"center" }}>
-            <motion.button
-              onClick={()=>claimable>0.1&&setShowClaim(true)}
-              disabled={claimable<=0.1}
-              whileHover={claimable>0.1?{ scale:1.03 }:{}}
-              whileTap={claimable>0.1?{ scale:0.97 }:{}}
-              data-cursor-hover
-              className={claimable>0.1?"rainbow-bg":""}
-              style={{ height:52, padding:"0 28px", borderRadius:13, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 60px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
-              {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
-            </motion.button>
-            <motion.button
-              onClick={()=>setShowPost(true)}
-              whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
-              data-cursor-hover
-              style={{ height:52, padding:"0 26px", borderRadius:13, border:`1px solid ${T.border}`, background:T.el, color:T.fg, fontWeight:600, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontFamily:"inherit", transition:"border-color 0.2s" }}
-              onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
-              onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
-              <span style={{ fontSize:18, lineHeight:1 }}>+</span> Submit Post
-            </motion.button>
-          </motion.div>
+              {/* Rate + fill cards */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
+                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Earn rate</p>
+                  {active?(
+                    <p className="rainbow-text" style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em" }}>+{fmt(totalRate,1)}<span style={{ fontSize:12, marginLeft:4 }}>DRIP/hr</span></p>
+                  ):(
+                    <p style={{ fontSize:14, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>Not earning</p>
+                  )}
+                </HoloCard>
+                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
+                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Claimable</p>
+                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:claimable>0.1?"#F4F4F8":T.faint }}>
+                    {fmt(claimable,2)} <span style={{ fontSize:12 }}>DRIP</span>
+                  </p>
+                </HoloCard>
+                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
+                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Campaigns</p>
+                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:T.fg }}>{joined.size} <span style={{ fontSize:12, color:T.faint }}>active</span></p>
+                </HoloCard>
+                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
+                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Posts</p>
+                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:T.fg }}>{posts.length} <span style={{ fontSize:12, color:T.faint }}>tracked</span></p>
+                </HoloCard>
+              </div>
+
+              {/* Status pill */}
+              <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"8px 16px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)", alignSelf:"flex-start" }}>
+                {active?(
+                  <>
+                    <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
+                      <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.55 }}/>
+                      <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
+                    </span>
+                    <span className="rainbow-text" style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>
+                      Dripping now — {joined.size} {joined.size===1?"campaign":"campaigns"} active
+                    </span>
+                  </>
+                ):(
+                  <span style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", color:T.faint }}>Join a campaign to start earning</span>
+                )}
+              </div>
+
+              {/* CTAs */}
+              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+                <motion.button
+                  onClick={()=>claimable>0.1&&setShowClaim(true)}
+                  disabled={claimable<=0.1}
+                  whileHover={claimable>0.1?{ scale:1.02 }:{}}
+                  whileTap={claimable>0.1?{ scale:0.97 }:{}}
+                  data-cursor-hover
+                  className={claimable>0.1?"rainbow-bg":""}
+                  style={{ height:48, padding:"0 24px", borderRadius:12, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:claimable>0.1?"#111":"rgba(255,255,255,0.25)", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 50px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
+                  {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
+                </motion.button>
+                <motion.button
+                  onClick={()=>setShowPost(true)}
+                  whileHover={{ scale:1.02 }} whileTap={{ scale:0.97 }}
+                  data-cursor-hover
+                  style={{ height:48, padding:"0 22px", borderRadius:12, border:`1px solid ${T.border}`, background:T.el, color:T.fg, fontWeight:600, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontFamily:"inherit", transition:"border-color 0.2s" }}
+                  onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
+                  onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
+                  <span style={{ fontSize:18, lineHeight:1 }}>+</span> Submit Post
+                </motion.button>
+              </div>
+            </motion.div>
+          </div>
         </motion.div>
 
         {/* Ticker */}
@@ -1259,66 +1416,109 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
         </div>
       </section>
 
-      {/* ════ STATS STRIP ════ */}
-      <StatsStrip/>
-
-      {/* ════ CAMPAIGNS ════ */}
-      <section id="campaigns" style={{ padding:"96px 0 80px", background:T.bg }}>
+      {/* ════ MAIN CONTENT GRID — campaigns left, activity right ════ */}
+      <section id="campaigns" style={{ padding:"80px 0 80px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
         <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px" }}>
-          <Reveal>
-            <div style={{ marginBottom:52 }}>
-              <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>01 — Campaigns</p>
-              <h2 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
-                Join a<br/><span className="rainbow-text">Campaign</span>
-              </h2>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 360px", gap:40, alignItems:"start" }} className="content-grid">
+
+            {/* ── Campaigns ── */}
+            <div>
+              <Reveal>
+                <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:36, flexWrap:"wrap", gap:12 }}>
+                  <div>
+                    <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>01 — Campaigns</p>
+                    <h2 style={{ fontSize:"clamp(1.8rem,3.5vw,2.6rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.95, margin:0 }}>
+                      Join a <span className="rainbow-text">Campaign</span>
+                    </h2>
+                  </div>
+                  <button onClick={()=>setShowCreateCampaign(true)} data-cursor-hover
+                    style={{ height:36, padding:"0 16px", borderRadius:9, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:6, transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
+                    onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color=T.fg; (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
+                    onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
+                    <span style={{ fontSize:16, lineHeight:1 }}>+</span> Create Campaign
+                  </button>
+                </div>
+              </Reveal>
+              <div className="campaign-grid">
+                {campaigns.length>0
+                  ? campaigns.map((c,i)=>(
+                      <CampaignCard key={c.id} c={c} joined={joined.has(c.id)} onToggle={()=>toggleCampaign(c.id)} earning={joined.has(c.id)&&active} index={i}/>
+                    ))
+                  : (
+                    <div style={{ gridColumn:"1/-1", padding:"56px 24px", borderRadius:16, border:`1px dashed ${T.border}`, textAlign:"center" }}>
+                      <p style={{ fontSize:13, color:T.faint }}>No campaigns live yet. Check back soon.</p>
+                    </div>
+                  )
+                }
+              </div>
             </div>
-          </Reveal>
-          <div className="campaign-grid">
-            {campaigns.map((c,i)=>(
-              <CampaignCard key={c.id} c={c} joined={joined.has(c.id)} onToggle={()=>toggleCampaign(c.id)} earning={joined.has(c.id)&&active} index={i}/>
-            ))}
+
+            {/* ── Sticky Activity Sidebar ── */}
+            <div style={{ position:"sticky", top:80, display:"flex", flexDirection:"column", gap:16 }}>
+
+              {/* Your posts */}
+              <HoloCard borderRadius={18} style={{ background:T.surface, overflow:"hidden" }}>
+                <div className="rainbow-bg" style={{ height:2 }}/>
+                <div style={{ padding:"20px 20px 0" }}>
+                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+                    <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint }}>Your Posts</p>
+                    <button onClick={()=>setShowPost(true)} data-cursor-hover
+                      style={{ height:26, padding:"0 10px", borderRadius:6, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4 }}>
+                      <span style={{ fontSize:14, lineHeight:1 }}>+</span> New
+                    </button>
+                  </div>
+                </div>
+                <div style={{ padding:"0 20px 20px", display:"flex", flexDirection:"column", gap:8 }}>
+                  {posts.length>0
+                    ? posts.slice(0,4).map(p=><PostCard key={p.id} post={p}/>)
+                    : (
+                      <div style={{ padding:"28px 0", textAlign:"center" }}>
+                        <p style={{ fontSize:12, color:T.faint, marginBottom:12, lineHeight:1.6 }}>No posts yet.<br/>Join a campaign and submit your tweet.</p>
+                        <button onClick={()=>setShowPost(true)} data-cursor-hover
+                          style={{ height:32, padding:"0 14px", borderRadius:8, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
+                          Submit Post
+                        </button>
+                      </div>
+                    )
+                  }
+                  {posts.length>4&&(
+                    <p style={{ fontSize:11, color:T.faint, textAlign:"center", fontFamily:"var(--font-geist-mono)", paddingTop:4 }}>+{posts.length-4} more posts</p>
+                  )}
+                </div>
+              </HoloCard>
+
+              {/* Stats summary */}
+              <HoloCard borderRadius={18} style={{ background:T.surface, padding:"20px" }}>
+                <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint, marginBottom:14 }}>Totals</p>
+                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                  {[
+                    { label:"Lifetime earned", value:`${fmt(balance,2)} DRIP` },
+                    { label:"USD value",        value:`$${fmt(balance*DRIP_PRICE,2)}` },
+                    { label:"Active campaigns", value:`${joined.size}` },
+                    { label:"Earn rate",        value:active?`${fmt(totalRate,1)} DRIP/hr`:"—" },
+                  ].map(row=>(
+                    <div key={row.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>
+                      <span style={{ fontSize:12, color:T.subtle }}>{row.label}</span>
+                      <span style={{ fontSize:13, fontWeight:600, fontFamily:"var(--font-geist-mono)", color:T.fg }}>{row.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </HoloCard>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* ════ FEED ════ */}
-      <section id="feed" style={{ padding:"80px 0 96px", background:T.surface, borderTop:`1px solid ${T.border}` }}>
+      {/* ════ LIVE FEED ════ */}
+      <section id="feed" style={{ padding:"72px 0 96px", background:T.surface, borderTop:`1px solid ${T.border}` }}>
         <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px" }}>
-
-          {/* Your Posts */}
           <Reveal>
-            <div style={{ marginBottom:40 }}>
-              <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>02 — Your posts</p>
-              <h2 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
-                Your<br/><span className="rainbow-text">Earnings</span>
-              </h2>
-            </div>
-          </Reveal>
-
-          <Reveal delay={0.1}>
-            {posts.length>0?(
-              <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:64 }}>
-                {posts.map(p=><PostCard key={p.id} post={p}/>)}
-              </div>
-            ):(
-              <div style={{ marginBottom:64, padding:"40px 24px", borderRadius:16, border:`1px dashed ${T.border}`, textAlign:"center" }}>
-                <p style={{ fontSize:13, color:T.faint, marginBottom:16 }}>No posts yet — join a campaign and submit your tweet to start earning.</p>
-                <button onClick={()=>setShowPost(true)} data-cursor-hover
-                  style={{ height:38, padding:"0 18px", borderRadius:9, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
-                  Submit Post
-                </button>
-              </div>
-            )}
-          </Reveal>
-
-          {/* Live feed */}
-          <Reveal delay={0.15}>
-            <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:12 }}>
+            <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:32, flexWrap:"wrap", gap:12 }}>
               <div>
-                <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>03 — Community</p>
-                <h3 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
+                <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>02 — Community</p>
+                <h2 style={{ fontSize:"clamp(1.8rem,3.5vw,2.6rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.95, margin:0 }}>
                   Live <span className="rainbow-text">Feed</span>
-                </h3>
+                </h2>
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:7, paddingBottom:4 }}>
                 <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
@@ -1328,16 +1528,18 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
                 <span className="rainbow-text" style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", fontWeight:600, letterSpacing:"0.08em" }}>LIVE</span>
               </div>
             </div>
+          </Reveal>
+          <Reveal delay={0.1}>
             <CommunityFeed/>
           </Reveal>
         </div>
       </section>
 
       {/* ════ FOOTER ════ */}
-      <footer style={{ background:T.bg, borderTop:`1px solid ${T.border}`, padding:"24px 24px" }}>
+      <footer style={{ background:T.bg, borderTop:`1px solid ${T.border}`, padding:"24px" }}>
         <div style={{ maxWidth:1200, margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
           <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <span className="rainbow-text" style={{ fontSize:15, fontWeight:800, letterSpacing:"-0.04em" }}>DRIP</span>
+            <Image src="/logos/DripLogo.png" alt="DRIP" width={40} height={32} style={{ objectFit:"contain" }}/>
             <span style={{ fontSize:12, color:T.faint }}>Web3 creator rewards on Solana.</span>
           </div>
           <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>Non-custodial · Your keys · Your vault</p>
@@ -1347,7 +1549,8 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
       {/* Modals */}
       <AnimatePresence>
         {showClaim&&<ClaimModal key="claim" claimable={claimable} onClose={()=>setShowClaim(false)} onConfirm={()=>handleClaim(claimable)}/>}
-        {showPost &&<SubmitModal key="submit" joined={Array.from(joined)} campaigns={campaigns} walletAddress={walletAddress} twitterHandle={twitterHandle} onClose={()=>setShowPost(false)} onSuccess={handleSubmit}/>}
+        {showPost &&<SubmitModal key="submit" joined={Array.from(joined)} campaigns={campaigns} walletAddress={walletAddress} twitterHandle={twitterHandle} authToken={authToken} onClose={()=>setShowPost(false)} onSuccess={handleSubmit}/>}
+        {showCreateCampaign&&<CreateCampaignModal key="create-campaign" authToken={authToken} onClose={()=>setShowCreateCampaign(false)} onSuccess={(c)=>{ setCampaigns(p=>[c,...p]); setShowCreateCampaign(false); }}/>}
       </AnimatePresence>
     </>
   );
@@ -1385,16 +1588,18 @@ export default function Page() {
 
   return (
     <TipProvider>
-      <div style={{ background:T.bg, color:T.fg, minHeight:"100vh" }}>
-        <Cursor/>
-        <AnimatePresence mode="wait">
-          {screen==="landing"
-            ? <Landing key="landing" onDone={handleLandingDone}/>
-            : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.5 }}>
-                <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken} onLogout={handleLogout}/>
-              </motion.div>
-          }
-        </AnimatePresence>
+      <div style={{ background:T.bg, color:T.fg, minHeight:"100vh", position:"relative" }}>
+        <div>
+          <Cursor/>
+          <AnimatePresence mode="wait">
+            {screen==="landing"
+              ? <Landing key="landing" onDone={handleLandingDone}/>
+              : <motion.div key="app" initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ duration:0.5 }}>
+                  <DripApp walletAddress={publicKey?.toString() ?? ""} twitterHandle={twitterHandle} authToken={authToken} onLogout={handleLogout}/>
+                </motion.div>
+            }
+          </AnimatePresence>
+        </div>
       </div>
     </TipProvider>
   );

@@ -172,14 +172,39 @@ body {
   .stats-grid > *:nth-child(odd)  { border-right:  1px solid rgba(255,255,255,0.07); }
 }
 
+/* ── Hero two-panel grid ── */
+.hero-grid {
+  grid-template-columns: 1fr 1fr;
+  gap: 48px;
+}
+@media (max-width: 900px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+  .hero-grid > *:last-child { align-items: center; }
+}
+
+/* ── Main content grid ── */
+.content-grid {
+  grid-template-columns: 1fr 360px;
+  gap: 40px;
+}
+@media (max-width: 1024px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+  .content-grid > *:last-child { position: static !important; }
+}
+
 /* ── Campaign grid ── */
 .campaign-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 20px;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
 }
-@media (max-width: 1024px) { .campaign-grid { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 640px)  { .campaign-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px)  { .campaign-grid { grid-template-columns: 1fr; } }
 
 /* ── Nav responsive ── */
 @media (max-width: 860px) { .nav-account { display: none !important; } }

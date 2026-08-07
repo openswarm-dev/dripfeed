@@ -1,6 +1,6 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-// ─── Shared types (mirrors drip-server store types) ──────────────────────────
+// ─── Shared types ─────────────────────────────────────────────────────────────
 
 export interface Campaign {
   id: string;
@@ -15,6 +15,14 @@ export interface Campaign {
   participants: number;
   active: boolean;
   createdAt: string;
+}
+
+export interface CreateCampaignInput {
+  project: string;
+  logo: string;
+  budgetTotal: number;
+  goal: number;
+  dripPerKViews: number;
 }
 
 export interface Vault {
@@ -43,10 +51,9 @@ export interface Post {
 }
 
 export interface SubmitPostInput {
-  walletAddress: string;
-  twitterHandle: string;
   tweetUrl: string;
   campaignId: string;
+  token: string;
 }
 
 export interface ClaimResult {
@@ -57,11 +64,14 @@ export interface ClaimResult {
   vault: Pick<Vault, "balance" | "claimable" | "fillPct">;
 }
 
-// ─── HTTP helper ─────────────────────────────────────────────────────────────
+// ─── HTTP helper ──────────────────────────────────────────────────────────────
 
-async function req<T>(path: string, options?: RequestInit): Promise<T> {
+async function req<T>(path: string, options?: RequestInit, token?: string): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
     ...options,
   });
   if (!res.ok) {
@@ -71,7 +81,7 @@ async function req<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// ─── API client ──────────────────────────────────────────────────────────────
+// ─── API client ───────────────────────────────────────────────────────────────
 
 export const api = {
   health: () =>
@@ -83,6 +93,13 @@ export const api = {
   getCampaign: (id: string) =>
     req<{ campaign: Campaign }>(`/api/campaigns/${id}`),
 
+  createCampaign: (data: CreateCampaignInput, token: string) =>
+    req<{ campaign: Campaign }>(
+      "/api/campaigns",
+      { method: "POST", body: JSON.stringify(data) },
+      token,
+    ),
+
   getVault: (address: string) =>
     req<{ vault: Vault }>(`/api/vault/${address}`),
 
@@ -92,7 +109,8 @@ export const api = {
   submitPost: (data: SubmitPostInput) =>
     req<{ post: Post; tweet: { viewCount: number; text: string }; message: string }>(
       "/api/posts/submit",
-      { method: "POST", body: JSON.stringify(data) },
+      { method: "POST", body: JSON.stringify({ tweetUrl: data.tweetUrl, campaignId: data.campaignId }) },
+      data.token,
     ),
 
   claimRewards: (walletAddress: string, amount: number) =>
