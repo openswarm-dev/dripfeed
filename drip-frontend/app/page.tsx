@@ -8,7 +8,7 @@ import {
   useEffect, useRef, useState, useCallback,
   createContext, useContext,
 } from "react";
-import type { CSSProperties } from "react";
+import type { CSSProperties } from "react"; // used by HoloCard
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useWalletModal } from "@solana/wallet-adapter-react-ui";
 import { api } from "@/lib/api";
@@ -433,70 +433,22 @@ function StatsStrip() {
   );
 }
 
-// ─── HoloCard — 3D tilt + specular light tracking ────────────────────────────
+// ─── HoloCard — glass panel with iridescent neon border ──────────────────────
 function HoloCard({ children, style, className, borderRadius = 20 }: {
   children: React.ReactNode;
   style?: CSSProperties;
   className?: string;
   borderRadius?: number;
 }) {
-  const cardRef   = useRef<HTMLDivElement>(null);
-  const glowRef   = useRef<HTMLDivElement>(null);
-  const rotX      = useSpring(0, { stiffness: 260, damping: 28 });
-  const rotY      = useSpring(0, { stiffness: 260, damping: 28 });
-  const scale     = useSpring(1, { stiffness: 280, damping: 28 });
-
-  function onMouseMove(e: React.MouseEvent<HTMLDivElement>) {
-    const el   = cardRef.current!;
-    const rect = el.getBoundingClientRect();
-    const nx   = (e.clientX - rect.left)  / rect.width;   // 0→1
-    const ny   = (e.clientY - rect.top)   / rect.height;  // 0→1
-    // Tilt: max ±10°
-    rotX.set((ny - 0.5) * -18);
-    rotY.set((nx - 0.5) *  18);
-    scale.set(1.025);
-    // Specular highlight follows cursor
-    if (glowRef.current) {
-      glowRef.current.style.background =
-        `radial-gradient(circle at ${nx*100}% ${ny*100}%, rgba(255,255,255,0.14) 0%, transparent 65%)`;
-    }
-  }
-
-  function onMouseLeave() {
-    rotX.set(0); rotY.set(0); scale.set(1);
-    if (glowRef.current) glowRef.current.style.background = "none";
-  }
-
   return (
-    <div style={{ perspective: 900 }}>
-      <motion.div
-        ref={cardRef}
-        className={`neon-border ${className ?? ""}`}
-        onMouseMove={onMouseMove}
-        onMouseLeave={onMouseLeave}
-        style={{
-          rotateX: rotX,
-          rotateY: rotY,
-          scale,
-          transformStyle: "preserve-3d",
-          willChange: "transform",
-          borderRadius,
-          ...style,
-        }}
-      >
-        {children}
-        {/* Specular highlight layer */}
-        <div ref={glowRef} style={{
-          position: "absolute", inset: 0, borderRadius,
-          pointerEvents: "none", zIndex: 10, transition: "background 0.05s",
-        }}/>
-        {/* Edge sheen (top-left corner light) */}
-        <div style={{
-          position: "absolute", inset: 0, borderRadius,
-          background: "linear-gradient(135deg, rgba(255,255,255,0.08) 0%, transparent 50%)",
-          pointerEvents: "none", zIndex: 9,
-        }}/>
-      </motion.div>
+    <div className={`neon-border ${className ?? ""}`} style={{ borderRadius, position:"relative", ...style }}>
+      {children}
+      {/* Static corner sheen */}
+      <div style={{
+        position:"absolute", inset:0, borderRadius,
+        background:"linear-gradient(135deg, rgba(255,255,255,0.06) 0%, transparent 45%)",
+        pointerEvents:"none",
+      }}/>
     </div>
   );
 }
