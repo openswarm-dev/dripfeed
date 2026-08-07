@@ -23,9 +23,10 @@ campaignsRouter.get('/:id', async (req: Request, res: Response) => {
 
 /** POST /api/campaigns — create a campaign (authenticated users) */
 campaignsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
-  const { project, logo, budgetTotal, goal, dripPerKViews } = req.body as {
+  const { project, logo, imageUrl, budgetTotal, goal, dripPerKViews } = req.body as {
     project: string;
     logo: string;
+    imageUrl?: string;
     budgetTotal: number;
     goal: number;
     dripPerKViews: number;
@@ -41,7 +42,6 @@ campaignsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
     return;
   }
 
-  // Human-readable rate label: e.g. "100K views → 1 DRIP"
   const kPerDrip = Math.round(1 / dripPerKViews);
   const rateLabel = `${kPerDrip}K views → 1 DRIP`;
 
@@ -50,6 +50,7 @@ campaignsRouter.post('/', requireAuth, async (req: Request, res: Response) => {
       id:           uuidv4(),
       project:      project.trim(),
       logo:         logo.trim().toUpperCase().slice(0, 6),
+      imageUrl:     imageUrl?.trim() || null,
       budgetTotal,
       budgetLeft:   budgetTotal,
       goal,

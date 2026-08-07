@@ -22,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <WalletProvider>
           {children}
         </WalletProvider>
+        <div id="dropdown-portal"/>
       </body>
     </html>
   );

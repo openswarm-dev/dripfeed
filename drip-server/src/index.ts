@@ -29,7 +29,7 @@ app.use(cors({
   methods: ['GET', 'POST', 'OPTIONS'],
 }));
 app.use(rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false }));
-app.use(express.json({ limit: '50kb' }));
+app.use(express.json({ limit: '8mb' }));  // allows base64-encoded images up to ~6MB source
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });

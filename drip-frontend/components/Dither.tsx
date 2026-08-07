@@ -143,7 +143,8 @@ class RetroEffectImpl extends Effect {
       ['pixelSize', new THREE.Uniform(2.0)],
     ]);
     super('RetroEffect', ditherFragmentShader, { uniforms });
-    this.uniforms = uniforms;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (this as any).uniforms = uniforms;
   }
   set colorNum(v: number) { this.uniforms.get('colorNum')!.value = v; }
   get colorNum(): number  { return this.uniforms.get('colorNum')!.value; }
@@ -155,7 +156,7 @@ const WrappedRetro = wrapEffect(RetroEffectImpl);
 
 const RetroEffect = forwardRef<RetroEffectImpl, { colorNum: number; pixelSize: number }>(
   ({ colorNum, pixelSize }, ref) => (
-    // @ts-expect-error – JSX prop mismatch from wrapEffect typing
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     <WrappedRetro ref={ref} colorNum={colorNum} pixelSize={pixelSize} />
   )
 );

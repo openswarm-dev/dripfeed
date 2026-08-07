@@ -20,6 +20,7 @@ export interface Campaign {
 export interface CreateCampaignInput {
   project: string;
   logo: string;
+  imageUrl?: string;
   budgetTotal: number;
   goal: number;
   dripPerKViews: number;

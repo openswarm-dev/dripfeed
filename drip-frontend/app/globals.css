@@ -172,43 +172,24 @@ body {
   .stats-grid > *:nth-child(odd)  { border-right:  1px solid rgba(255,255,255,0.07); }
 }
 
-/* ── Hero two-panel grid ── */
-.hero-grid {
-  grid-template-columns: 1fr 1fr;
-  gap: 48px;
-}
-@media (max-width: 900px) {
-  .hero-grid {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-  .hero-grid > *:last-child { align-items: center; }
-}
-
-/* ── Main content grid ── */
-.content-grid {
-  grid-template-columns: 1fr 360px;
-  gap: 40px;
-}
-@media (max-width: 1024px) {
-  .content-grid {
-    grid-template-columns: 1fr;
-  }
-  .content-grid > *:last-child { position: static !important; }
-}
-
-/* ── Campaign grid ── */
-.campaign-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 16px;
-}
-@media (max-width: 700px)  { .campaign-grid { grid-template-columns: 1fr; } }
-
 /* ── Nav responsive ── */
 @media (max-width: 860px) { .nav-account { display: none !important; } }
 @media (max-width: 640px) { .nav-links   { display: none !important; } }
 
-/* ── Scroll anchor offset ── */
-html { scroll-padding-top: 70px; }
+/* ── Dashboard panel scrollbars ── */
+.panel-scroll::-webkit-scrollbar { width: 3px; }
+.panel-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 4px; }
+.panel-scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.16); }
+
+/* ── Prevent body scroll in dashboard ── */
+body.in-app { overflow: hidden; }
+
+/* ── Hide browser number input spinners ── */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+input[type=number] { -moz-appearance: textfield; }
+
+/* ── Dropdown portal overlay sits above everything ── */
+#dropdown-portal { position: fixed; top: 0; left: 0; z-index: 2147483647; pointer-events: none; }
+#dropdown-portal > * { pointer-events: all; }

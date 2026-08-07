@@ -1,13 +1,14 @@
-"use client";
+﻿"use client";
 
 import {
   motion, AnimatePresence, useSpring,
-  useScroll, useTransform, useInView,
+  useInView,
 } from "motion/react";
 import {
   useEffect, useRef, useState, useCallback,
   createContext, useContext,
 } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties } from "react"; // used by HoloCard
 import { useWallet } from "@solana/wallet-adapter-react";
 import WalletSelectModal from "@/components/WalletSelectModal";
@@ -15,7 +16,7 @@ import { api } from "@/lib/api";
 import type { Campaign as APICampaign, Post as APIPost, Vault as APIVault } from "@/lib/api";
 import Image from "next/image";
 
-// ─── Design tokens ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Design tokens â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const T = {
   bg:      "#111114",
   surface: "#18181C",
@@ -29,10 +30,11 @@ const T = {
 
 const ease = [0.22, 1, 0.36, 1] as const;
 const DRIP_PRICE = 1.50;
-const VAULT_W = 220;
-const VAULT_H = 360;
+const VAULT_W = 300;
+const VAULT_H = 630;
+const NAV_H   = 60; // matches header height
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type Screen     = "landing" | "app";
 type ClaimState = "idle" | "signing" | "submitting" | "confirmed";
 interface Drop   { id: string; x: number; size: number; duration: number; score: number }
@@ -50,13 +52,13 @@ const CGRADIENT: Record<string,string> = {
   c4: "linear-gradient(145deg, rgba(220,200,255,0.12) 0%, rgba(200,210,255,0.08) 50%, rgba(5,5,8,0.95) 100%)",
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const fmt  = (n:number,d=2) => n.toLocaleString("en-US",{minimumFractionDigits:d,maximumFractionDigits:d});
 const fmtK = (n:number) => n>=1_000_000?(n/1_000_000).toFixed(1)+"M":n>=1_000?Math.round(n/1_000)+"K":String(n);
 const uid  = () => Math.random().toString(36).slice(2);
 const rnd  = (lo:number,hi:number) => lo+Math.random()*(hi-lo);
 
-// ─── Tooltip context ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Tooltip context â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface TipData { text: string; x: number; y: number }
 const TipCtx = createContext<{
   show: (e: React.MouseEvent, text: string) => void;
@@ -88,7 +90,7 @@ function TipProvider({ children }: { children: React.ReactNode }) {
               border:`1px solid ${T.border}`,
               borderRadius:8,
               padding:"6px 11px",
-              fontSize:12,
+              fontSize:14,
               color:T.fg,
               fontFamily:"var(--font-geist-mono)",
               pointerEvents:"none",
@@ -114,22 +116,36 @@ function TipProvider({ children }: { children: React.ReactNode }) {
 
 function useTip() { return useContext(TipCtx); }
 
-// ─── Custom Select ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Custom Select â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 interface SelectOption { value: string; label: string }
 
 function Select({ options, value, onChange, placeholder="Select..." }: {
   options: SelectOption[]; value: string; onChange:(v:string)=>void; placeholder?:string;
 }) {
   const [open, setOpen] = useState(false);
-  const [pos,  setPos]  = useState({ top:0, left:0, width:0 });
+  const [pos,  setPos]  = useState({ top:0, left:0, width:0, above:false });
   const btnRef  = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const [portalEl, setPortalEl] = useState<Element|null>(null);
   const selected = options.find(o => o.value === value);
 
+  useEffect(() => {
+    setPortalEl(document.getElementById("dropdown-portal") ?? document.body);
+  }, []);
+
+  const ITEM_H = 46;
   const handleToggle = () => {
-    if (!open) {
-      const rect = btnRef.current!.getBoundingClientRect();
-      setPos({ top: rect.bottom + 6, left: rect.left, width: rect.width });
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const menuH = Math.min(options.length * ITEM_H, 240) + 8;
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const above = spaceBelow < menuH + 12 && rect.top > menuH + 12;
+      setPos({
+        top:   above ? rect.top - menuH - 6 : rect.bottom + 6,
+        left:  rect.left,
+        width: rect.width,
+        above,
+      });
     }
     setOpen(p => !p);
   };
@@ -146,65 +162,107 @@ function Select({ options, value, onChange, placeholder="Select..." }: {
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
+  // Chevron SVG — avoids encoding corruption issues
+  const Chevron = () => (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
+      style={{ flexShrink:0, color:T.faint, transition:"transform 0.18s", transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
+      <polyline points="6 9 12 15 18 9"/>
+    </svg>
+  );
+
+  const menu = (
+    <AnimatePresence>
+      {open && (
+        <motion.div ref={menuRef}
+          initial={{ opacity:0, y:-6, scale:0.97 }}
+          animate={{ opacity:1, y:0, scale:1 }}
+          exit={{ opacity:0, y:-6, scale:0.97 }}
+          transition={{ duration:0.15 }}
+          style={{
+            position:"fixed",
+            top:pos.top, left:pos.left, width:pos.width,
+            zIndex:99999,
+            background:"#1a1b1f",
+            border:`1px solid ${T.border}`,
+            borderRadius:12,
+            overflow:"hidden",
+            boxShadow:"0 20px 60px -10px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.04)",
+          }}>
+          {options.map((opt, i) => (
+            <button key={opt.value} data-cursor-hover
+              onClick={() => { onChange(opt.value); setOpen(false); }}
+              style={{
+                display:"block", width:"100%",
+                padding:"12px 16px", textAlign:"left",
+                background: opt.value===value ? "rgba(255,255,255,0.07)" : "transparent",
+                color: opt.value===value ? T.drip : T.fg,
+                fontSize:15, border:"none", cursor:"pointer",
+                borderBottom: i < options.length-1 ? `1px solid ${T.border}` : "none",
+                fontFamily:"inherit", transition:"background 0.12s",
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.05)"; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.07)" : "transparent"; }}>
+              {opt.label}
+            </button>
+          ))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <>
       <button ref={btnRef} onClick={handleToggle} data-cursor-hover
         style={{
-          width:"100%", height:44, padding:"0 14px",
+          width:"100%", height:48, padding:"0 14px 0 16px",
           background:T.el,
-          border:`1px solid ${open ? T.subtle : T.border}`,
+          border:`1px solid ${open ? "rgba(255,255,255,0.25)" : T.border}`,
           borderRadius:11, cursor:"pointer",
-          display:"flex", alignItems:"center", justifyContent:"space-between",
-          fontSize:13, color: selected ? T.fg : T.faint,
+          display:"flex", alignItems:"center", justifyContent:"space-between", gap:8,
+          fontSize:15, color: selected ? T.fg : T.faint,
           transition:"border-color 0.2s", fontFamily:"inherit",
         }}>
-        <span>{selected?.label ?? placeholder}</span>
-        <motion.span animate={{ rotate: open ? 180 : 0 }} transition={{ duration:0.18 }}
-          style={{ fontSize:10, color:T.faint, display:"inline-block", lineHeight:1 }}>▾</motion.span>
+        <span style={{ flex:1, textAlign:"left", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+          {selected?.label ?? placeholder}
+        </span>
+        <Chevron/>
       </button>
-
-      <AnimatePresence>
-        {open && (
-          <motion.div ref={menuRef}
-            initial={{ opacity:0, y:-6, scale:0.97 }}
-            animate={{ opacity:1, y:0, scale:1 }}
-            exit={{ opacity:0, y:-6, scale:0.97 }}
-            transition={{ duration:0.15 }}
-            style={{
-              position:"fixed",
-              top:pos.top, left:pos.left, width:pos.width,
-              zIndex:8000,
-              background:T.el,
-              border:`1px solid ${T.border}`,
-              borderRadius:12,
-              overflow:"hidden",
-              boxShadow:"0 20px 50px -10px rgba(0,0,0,0.75)",
-            }}>
-            {options.map((opt, i) => (
-              <button key={opt.value} data-cursor-hover
-                onClick={() => { onChange(opt.value); setOpen(false); }}
-                style={{
-                  display:"block", width:"100%",
-                  padding:"11px 14px", textAlign:"left",
-                  background: opt.value===value ? "rgba(255,255,255,0.07)" : "transparent",
-                  color: opt.value===value ? T.drip : T.fg,
-                  fontSize:13, border:"none", cursor:"pointer",
-                  borderBottom: i < options.length-1 ? `1px solid ${T.border}` : "none",
-                  fontFamily:"inherit", transition:"background 0.12s",
-                }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.07)" : "transparent"; }}>
-                {opt.label}
-              </button>
-            ))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {portalEl && createPortal(menu, portalEl)}
     </>
   );
 }
 
-// ─── Wave surface — fill + glowing stroke on ONE path so they're perfectly unified
+// ─── Custom number input with +/- buttons ───────────────────────────────────
+function NumInput({ value, onChange, min=0, max=Infinity, step=1 }: {
+  value:number; onChange:(v:number)=>void; min?:number; max?:number; step?:number;
+}) {
+  const adjust = (delta: number) => {
+    const next = +(value + delta).toFixed(10);
+    onChange(Math.max(min, Math.min(max, next)));
+  };
+  const btnBase: React.CSSProperties = {
+    width:48, height:"100%", border:"none", background:"none",
+    color:T.subtle, fontSize:22, fontWeight:300, cursor:"pointer",
+    display:"flex", alignItems:"center", justifyContent:"center",
+    flexShrink:0, transition:"color 0.15s", lineHeight:1,
+    fontFamily:"var(--font-geist-mono)",
+  };
+  return (
+    <div style={{ display:"flex", alignItems:"stretch", background:T.el, border:`1px solid ${T.border}`, borderRadius:11, overflow:"hidden", height:48 }}>
+      <button style={{ ...btnBase, borderRight:`1px solid ${T.border}` }} onClick={() => adjust(-step)}
+        onMouseEnter={e=>(e.currentTarget.style.color=T.fg)} onMouseLeave={e=>(e.currentTarget.style.color=T.subtle)}>−</button>
+      <input type="number" value={value}
+        onChange={e => { const v=parseFloat(e.target.value); if(!isNaN(v)) onChange(Math.max(min,Math.min(max,v))); }}
+        style={{ flex:1, height:"100%", background:"none", border:"none", textAlign:"center",
+          fontSize:16, color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600, outline:"none", minWidth:0 }}/>
+      <button style={{ ...btnBase, borderLeft:`1px solid ${T.border}` }} onClick={() => adjust(step)}
+        onMouseEnter={e=>(e.currentTarget.style.color=T.fg)} onMouseLeave={e=>(e.currentTarget.style.color=T.subtle)}>+</button>
+    </div>
+  );
+}
+
+
+// â”€â”€â”€ Wave surface — fill + glowing stroke on ONE path so they're perfectly unified
 function WaveSurface() {
   const paths = [
     "M0,8 C45,16 95,0 140,8 C180,16 210,4 220,8 L220,22 L0,22 Z",
@@ -236,7 +294,7 @@ function WaveSurface() {
   );
 }
 
-// ─── Drop particle — teardrop + score label fall together ─────────────────────
+// â”€â”€â”€ Drop particle — teardrop + score label fall together â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DropParticle({ drop, fillPct, onEnd }: { drop:Drop; fillPct:number; onEnd:()=>void }) {
   // Text area sits above the teardrop in the container.
   // The container starts TEXT_OFFSET above the vault (clipped).
@@ -291,7 +349,7 @@ function DropParticle({ drop, fillPct, onEnd }: { drop:Drop; fillPct:number; onE
   );
 }
 
-// ─── Ripple effect (multi-ring water impact) ─────────────────────────────────
+// â”€â”€â”€ Ripple effect (multi-ring water impact) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function RippleEffect({ ripple, fillPct }: { ripple:Ripple; fillPct:number }) {
   const y = VAULT_H * ((100 - fillPct) / 100) - 3;
   const rings = [
@@ -330,45 +388,42 @@ function RippleEffect({ ripple, fillPct }: { ripple:Ripple; fillPct:number }) {
   );
 }
 
-// ─── Vault ────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Vault â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Vault({ fillPct, drops, ripples, onDropEnd, active }: {
   fillPct:number; drops:Drop[]; ripples:Ripple[];
   onDropEnd:(id:string)=>void; active:boolean;
 }) {
   return (
     <div style={{
-      position:"relative", width:VAULT_W, height:VAULT_H, borderRadius:28,
-      background:"rgba(255,255,255,0.02)",
+      position:"relative", width:VAULT_W, height:VAULT_H,
+      background:"rgba(255,255,255,0.015)",
       overflow:"hidden",
       boxShadow: active
-        ? "0 0 80px -16px rgba(255,255,255,0.3), 0 0 40px -10px rgba(220,210,255,0.2), inset 0 0 60px -20px rgba(255,255,255,0.04)"
-        : "0 0 40px -16px rgba(255,255,255,0.08)",
+        ? "inset 0 0 80px -20px rgba(255,255,255,0.06)"
+        : "none",
       transition:"box-shadow 1.2s ease",
-      backdropFilter:"blur(24px)",
     }}>
       {[20,40,60,80].map(p=>(
         <div key={p} style={{ position:"absolute", right:0, bottom:`${p}%`, display:"flex", alignItems:"center" }}>
           <span style={{ fontSize:7, color:"rgba(255,255,255,0.18)", fontFamily:"var(--font-geist-mono)", paddingRight:6 }}>{p}</span>
-          <div style={{ width:10, height:1, background:"rgba(255,255,255,0.1)" }}/>
+          <div style={{ width:12, height:1, background:"rgba(255,255,255,0.1)" }}/>
         </div>
       ))}
       <motion.div style={{ position:"absolute", bottom:0, left:0, right:0, overflow:"visible" }}
         animate={{ height:`${fillPct}%` }} transition={{ duration:2.6, ease:[0.22,1,0.36,1] }}>
         <WaveSurface/>
-        {/* Liquid body */}
         <div style={{ position:"absolute", top:8, bottom:0, left:0, right:0, background:"linear-gradient(to top,rgba(255,255,255,0.1) 0%,rgba(255,255,255,0.03) 100%)" }}/>
-        {/* Subsurface glow just below the wave */}
-        <div style={{ position:"absolute", top:8, height:32, left:0, right:0, background:"linear-gradient(to bottom,rgba(255,255,255,0.12) 0%,transparent 100%)" }}/>
+        <div style={{ position:"absolute", top:8, height:36, left:0, right:0, background:"linear-gradient(to bottom,rgba(255,255,255,0.12) 0%,transparent 100%)" }}/>
       </motion.div>
       {drops.map(d=><DropParticle key={d.id} drop={d} fillPct={fillPct} onEnd={()=>onDropEnd(d.id)}/>)}
       {ripples.map(r=><RippleEffect key={r.id} ripple={r} fillPct={fillPct}/>)}
       {/* Glass sheen */}
-      <div style={{ position:"absolute", inset:0, borderRadius:28, background:"linear-gradient(135deg,rgba(255,255,255,0.07) 0%,rgba(255,255,255,0) 45%,rgba(220,210,255,0.03) 100%)", pointerEvents:"none" }}/>
+      <div style={{ position:"absolute", inset:0, background:"linear-gradient(135deg,rgba(255,255,255,0.06) 0%,rgba(255,255,255,0) 50%)", pointerEvents:"none" }}/>
     </div>
   );
 }
 
-// ─── Animated number ──────────────────────────────────────────────────────────
+// â”€â”€â”€ Animated number â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function AnimNum({ value, d=2 }: { value:number; d?:number }) {
   const sp = useSpring(value, { stiffness:38, damping:12 });
   const [disp, setDisp] = useState(value);
@@ -377,7 +432,7 @@ function AnimNum({ value, d=2 }: { value:number; d?:number }) {
   return <>{fmt(disp,d)}</>;
 }
 
-// ─── InView reveal wrapper ────────────────────────────────────────────────────
+// â”€â”€â”€ InView reveal wrapper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Reveal({ children, delay=0, className }: { children:React.ReactNode; delay?:number; className?:string }) {
   const ref = useRef<HTMLDivElement>(null);
   const inView = useInView(ref, { once:true, margin:"-50px" });
@@ -391,7 +446,7 @@ function Reveal({ children, delay=0, className }: { children:React.ReactNode; de
   );
 }
 
-// ─── Ticker marquee ───────────────────────────────────────────────────────────
+// â”€â”€â”€ Ticker marquee â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TICKER_ITEMS = ["DRIP","Earn","Post","Claim","Grow","Web3","Creators","Solana"];
 function Ticker() {
   const doubled = [...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS,...TICKER_ITEMS];
@@ -399,7 +454,7 @@ function Ticker() {
     <div style={{ display:"flex", alignItems:"center", height:"100%", overflow:"hidden", paddingLeft:28 }}>
       <div className="ticker-track" style={{ display:"flex", gap:56, whiteSpace:"nowrap", flexShrink:0 }}>
         {doubled.map((item,i)=>(
-          <span key={i} style={{ display:"inline-flex", alignItems:"center", gap:10, fontSize:10, color:T.faint, fontFamily:"var(--font-geist-mono)", letterSpacing:"0.14em", textTransform:"uppercase" }}>
+          <span key={i} style={{ display:"inline-flex", alignItems:"center", gap:10, fontSize:14, color:T.faint, fontFamily:"var(--font-geist-mono)", letterSpacing:"0.14em", textTransform:"uppercase" }}>
             <span className="rainbow-bg" style={{ display:"inline-flex", width:4, height:4, borderRadius:"50%", flexShrink:0 }}/>
             {item}
           </span>
@@ -409,7 +464,7 @@ function Ticker() {
   );
 }
 
-// ─── Stats strip ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Stats strip â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function StatsStrip() {
   const { show:showTip, hide:hideTip } = useTip();
   const stats = [
@@ -425,7 +480,7 @@ function StatsStrip() {
           <div key={s.lbl} className={i<stats.length-1?"stat-border stat-item":"stat-item"}
             style={{ padding:"28px 32px", cursor:"help" }}
             onMouseEnter={e=>showTip(e,s.tip)} onMouseLeave={hideTip}>
-            <p style={{ fontSize:9, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>{s.lbl}</p>
+            <p style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>{s.lbl}</p>
             <p className="rainbow-text" style={{ fontSize:"clamp(1.8rem,3vw,2.6rem)", fontWeight:800, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.03em", lineHeight:1 }}>{s.val}</p>
           </div>
         ))}
@@ -434,7 +489,7 @@ function StatsStrip() {
   );
 }
 
-// ─── HoloCard — glass panel with iridescent neon border ──────────────────────
+// â”€â”€â”€ HoloCard — glass panel with iridescent neon border â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function HoloCard({ children, style, className, borderRadius = 20 }: {
   children: React.ReactNode;
   style?: CSSProperties;
@@ -454,7 +509,7 @@ function HoloCard({ children, style, className, borderRadius = 20 }: {
   );
 }
 
-// ─── Campaign card ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Campaign card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function CampaignCard({ c, joined, onToggle, earning, index }: {
   c:Campaign; joined:boolean; onToggle:()=>void; earning:boolean; index:number;
 }) {
@@ -483,11 +538,11 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
 
         {/* Corner labels */}
         <div style={{ position:"absolute", top:16, left:18, right:18, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <span style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", color:"rgba(255,255,255,0.35)", letterSpacing:"0.08em" }}>
+          <span style={{ fontSize:15, fontFamily:"var(--font-geist-mono)", color:"rgba(255,255,255,0.35)", letterSpacing:"0.08em" }}>
             {String(index+1).padStart(2,"0")}
           </span>
           <span style={{
-            fontSize:9, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em",
+            fontSize:11, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em",
             padding:"3px 9px", borderRadius:5,
             background: joined?"rgba(255,255,255,0.14)":"rgba(0,0,0,0.28)",
             border:`1px solid ${joined?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.15)"}`,
@@ -501,7 +556,7 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
         {/* Bottom text */}
         <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"44px 18px 18px", background:"linear-gradient(to top,rgba(0,0,0,0.68) 0%,transparent 100%)" }}>
           <p style={{ fontSize:18, fontWeight:800, color:"#fff", letterSpacing:"-0.025em", marginBottom:3, lineHeight:1.15 }}>{c.project}</p>
-          <p style={{ fontSize:11, color:"rgba(255,255,255,0.5)", fontFamily:"var(--font-geist-mono)" }}>{c.rateLabel}</p>
+          <p style={{ fontSize:15, color:"rgba(255,255,255,0.5)", fontFamily:"var(--font-geist-mono)" }}>{c.rateLabel}</p>
         </div>
       </div>
 
@@ -518,8 +573,8 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
             <div key={s.lbl}
               style={{ padding:"8px 10px", background:T.el, borderRadius:10, border:`1px solid ${s.hi?"rgba(255,255,255,0.2)":T.border}`, cursor:"help" }}
               onMouseEnter={e=>showTip(e,s.tip)} onMouseLeave={hideTip}>
-              <p style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:3 }}>{s.lbl}</p>
-              <p style={{ fontSize:13, fontWeight:700, color:s.hi?T.drip:T.fg, fontFamily:"var(--font-geist-mono)" }}>{s.val}</p>
+              <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:3 }}>{s.lbl}</p>
+              <p style={{ fontSize:15, fontWeight:700, color:s.hi?T.drip:T.fg, fontFamily:"var(--font-geist-mono)" }}>{s.val}</p>
             </div>
           ))}
         </div>
@@ -527,16 +582,16 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
         {/* Progress bar */}
         <div style={{ marginBottom:14 }}>
           <div style={{ display:"flex", justifyContent:"space-between", marginBottom:6 }}>
-            <span style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Campaign goal</span>
-            <span style={{ fontSize:11, color:T.subtle, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>{pct}%</span>
+            <span style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em" }}>Campaign goal</span>
+            <span style={{ fontSize:15, color:T.subtle, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>{pct}%</span>
           </div>
           <div style={{ height:4, background:T.el, borderRadius:2, overflow:"hidden" }}>
             <motion.div className="rainbow-bg" style={{ height:"100%", borderRadius:2 }}
               initial={{ width:0 }} animate={{ width:`${pct}%` }} transition={{ duration:1.3, ease, delay:0.4 }}/>
           </div>
           <div style={{ display:"flex", justifyContent:"space-between", marginTop:5 }}>
-            <span style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>{fmtK(c.verified)} verified</span>
-            <span style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>of {fmtK(c.goal)}</span>
+            <span style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>{fmtK(c.verified)} verified</span>
+            <span style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>of {fmtK(c.goal)}</span>
           </div>
         </div>
 
@@ -549,18 +604,18 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
               <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.5 }}/>
               <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
             </span>
-            <span className="rainbow-text" style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>Earning {c.dripHr} DRIP/hr</span>
+            <span className="rainbow-text" style={{ fontSize:15, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>Earning {c.dripHr} DRIP/hr</span>
           </div>
         )}
 
         {/* Join / Leave */}
         <button onClick={onToggle} data-cursor-hover
           style={{
-            width:"100%", height:42, borderRadius:11,
+            width:"100%", height:48, borderRadius:11,
             background: joined?"rgba(255,255,255,0.08)":T.el,
             border:`1px solid ${joined?"rgba(255,255,255,0.22)":T.border}`,
             color: joined?T.drip:T.fg,
-            fontWeight:700, fontSize:13, cursor:"pointer",
+            fontWeight:700, fontSize:15, cursor:"pointer",
             display:"flex", alignItems:"center", justifyContent:"center", gap:6,
             transition:"all 0.25s ease", letterSpacing:"0.01em", fontFamily:"inherit",
           }}>
@@ -572,27 +627,27 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
   );
 }
 
-// ─── Post card ────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Post card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function PostCard({ post }: { post:Post }) {
   return (
     <div style={{ background:T.el, border:`1px solid rgba(255,255,255,0.1)`, borderRadius:14, padding:"14px 18px", display:"flex", alignItems:"center", gap:14 }}>
       <div style={{ width:38, height:38, borderRadius:10, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
-        <span className="rainbow-text" style={{ fontSize:16, lineHeight:1 }}>↑</span>
+        <span className="rainbow-text" style={{ fontSize:16, lineHeight:1 }}>â†‘</span>
       </div>
       <div style={{ flex:1, minWidth:0 }}>
-        <p style={{ fontSize:13, color:T.fg, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:3, lineHeight:1.4 }}>{post.snippet}</p>
-        <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>{fmtK(post.impressions)} impressions · {post.campaign}</p>
+        <p style={{ fontSize:15, color:T.fg, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:3, lineHeight:1.4 }}>{post.snippet}</p>
+        <p style={{ fontSize:15, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>{fmtK(post.impressions)} impressions Â· {post.campaign}</p>
       </div>
       <div style={{ textAlign:"right", flexShrink:0 }}>
         <p className="rainbow-text" style={{ fontSize:16, fontFamily:"var(--font-geist-mono)", fontWeight:700, lineHeight:1, marginBottom:2 }}>+{post.dripHr}</p>
-        <p style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em" }}>DRIP/hr</p>
+        <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em" }}>DRIP/hr</p>
       </div>
     </div>
   );
 }
 
-// ─── Community feed ───────────────────────────────────────────────────────────
-function CommunityFeed() {
+// â”€â”€â”€ Community feed â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function CommunityFeed({ compact = false }: { compact?: boolean }) {
   const [items, setItems] = useState<FeedEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -618,33 +673,39 @@ function CommunityFeed() {
   };
 
   if (loading) return (
-    <div style={{ textAlign:"center", padding:"32px 0", color:T.faint, fontSize:13 }}>Loading activity…</div>
+    <div style={{ textAlign:"center", padding:"24px 16px", color:T.faint, fontSize:15 }}>Loading…</div>
   );
 
   if (items.length === 0) return (
-    <div style={{ textAlign:"center", padding:"40px 0", color:T.faint, fontSize:13 }}>
-      No activity yet. Be the first to submit a post and start earning.
+    <div style={{ textAlign:"center", padding:"24px 16px", color:T.faint, fontSize:14, lineHeight:1.6 }}>
+      No activity yet.<br/>Be the first to post.
     </div>
   );
 
   return (
-    <div style={{ display:"flex", flexDirection:"column", gap:3 }}>
+    <div style={{ display:"flex", flexDirection:"column" }}>
       <AnimatePresence mode="popLayout">
-        {items.slice(0,10).map(item=>(
+        {items.slice(0, compact ? 30 : 10).map(item=>(
           <motion.div key={item.id} layout
-            initial={{ opacity:0, y:-14 }} animate={{ opacity:1, y:0 }}
-            exit={{ opacity:0, height:0 }} transition={{ duration:0.3, ease }}
-            style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 16px", borderRadius:11, background:T.el, border:`1px solid ${T.border}`, overflow:"hidden" }}>
+            initial={{ opacity:0, y:-10 }} animate={{ opacity:1, y:0 }}
+            exit={{ opacity:0, height:0 }} transition={{ duration:0.25, ease }}
+            style={{ display:"flex", alignItems:"center", gap:10, padding: compact ? "10px 20px" : "10px 16px", borderBottom:`1px solid ${T.border}`, overflow:"hidden" }}>
             <div style={{ width:5, height:5, borderRadius:"50%", background:T.faint, flexShrink:0 }}/>
-            <a href={item.tweetUrl} target="_blank" rel="noopener noreferrer"
-              className="rainbow-text"
-              style={{ fontFamily:"var(--font-geist-mono)", fontWeight:700, flexShrink:0, fontSize:12, textDecoration:"none" }}>
-              @{item.handle}
-            </a>
-            <span style={{ color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600, fontSize:12 }}>+{Number(item.earned).toFixed(4)}</span>
-            <span style={{ color:T.faint, fontSize:11, flexShrink:0 }}>DRIP</span>
-            <span style={{ color:T.faint, fontSize:11, flex:1, textOverflow:"ellipsis", overflow:"hidden", whiteSpace:"nowrap" }}>{item.campaign}</span>
-            <span style={{ color:T.faint, fontSize:10, fontFamily:"var(--font-geist-mono)", flexShrink:0 }}>{age(item.submittedAt)}</span>
+            <div style={{ flex:1, minWidth:0 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:2 }}>
+                <a href={item.tweetUrl} target="_blank" rel="noopener noreferrer"
+                  className="rainbow-text"
+                  style={{ fontFamily:"var(--font-geist-mono)", fontWeight:700, fontSize:14, textDecoration:"none", flexShrink:0 }}>
+                  @{item.handle}
+                </a>
+                <span style={{ color:T.faint, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{item.campaign}</span>
+              </div>
+              <div style={{ display:"flex", alignItems:"center", gap:4 }}>
+                <span style={{ color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600, fontSize:15 }}>+{Number(item.earned).toFixed(4)}</span>
+                <span style={{ color:T.faint, fontSize:14, fontFamily:"var(--font-geist-mono)" }}>DRIP</span>
+              </div>
+            </div>
+            <span style={{ color:T.faint, fontSize:14, fontFamily:"var(--font-geist-mono)", flexShrink:0 }}>{age(item.submittedAt)}</span>
           </motion.div>
         ))}
       </AnimatePresence>
@@ -652,37 +713,60 @@ function CommunityFeed() {
   );
 }
 
-// ─── Create campaign modal ────────────────────────────────────────────────────
+// â”€â”€â”€ Create campaign modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function CreateCampaignModal({ authToken, onClose, onSuccess }: {
   authToken: string;
   onClose: () => void;
   onSuccess: (c: Campaign) => void;
 }) {
-  const [project,       setProject]       = useState("");
-  const [logo,          setLogo]          = useState("");
-  const [budget,        setBudget]        = useState("");
-  const [goal,          setGoal]          = useState("");
-  const [dripPerK,      setDripPerK]      = useState("0.01");
-  const [state,         setState]         = useState<"idle"|"saving"|"done"|"error">("idle");
-  const [errMsg,        setErrMsg]        = useState("");
+  const [step,      setStep]     = useState(1);
+  const [project,   setProject]  = useState("");
+  const [ticker,    setTicker]   = useState("");
+  const [imageUrl,  setImageUrl] = useState("");   // base64 data URL or empty
+  const [imgName,   setImgName]  = useState("");   // original filename for display
+  const [dragOver,  setDragOver] = useState(false);
+  const [budget,    setBudget]   = useState(10000);
+  const [goal,      setGoal]     = useState(5000000);
+  const [dripPerK,  setDripPerK] = useState(0.01);
+  const [saving,    setSaving]   = useState(false);
+  const [errMsg,    setErrMsg]   = useState("");
 
-  const kPerDrip = dripPerK && +dripPerK > 0 ? Math.round(1 / +dripPerK) : 0;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function handleImageFile(file: File) {
+    if (!file.type.startsWith("image/")) return;
+    const MAX_MB = 4;
+    if (file.size > MAX_MB * 1024 * 1024) { setErrMsg(`Image must be under ${MAX_MB}MB`); return; }
+    setErrMsg("");
+    setImgName(file.name);
+    const reader = new FileReader();
+    reader.onload = e => setImageUrl(e.target?.result as string ?? "");
+    reader.readAsDataURL(file);
+  }
+
+  const step1Valid = project.trim().length > 0;
+  const step2Valid = ticker.trim().length > 0 && budget > 0;
+  const step3Valid = goal > 0 && dripPerK > 0;
+  const canLaunch  = step1Valid && step2Valid && step3Valid && !saving;
+  const kPerDrip   = dripPerK > 0 ? Math.round(1 / dripPerK) : 0;
+  const STEPS = 3;
 
   async function save() {
-    if (!project.trim()||!logo.trim()||!budget||!goal||!dripPerK) return;
-    setState("saving"); setErrMsg("");
+    if (!canLaunch) return;
+    setSaving(true); setErrMsg("");
     try {
       const res = await api.createCampaign({
         project: project.trim(),
-        logo: logo.trim(),
-        budgetTotal: +budget,
-        goal: +goal,
-        dripPerKViews: +dripPerK,
+        logo: ticker.trim(),
+        imageUrl: imageUrl.trim() || undefined,
+        budgetTotal: budget,
+        goal,
+        dripPerKViews: dripPerK,
       }, authToken);
-      // Map to local Campaign shape
       const c = res.campaign;
       onSuccess({
         id: c.id, project: c.project, av: c.logo,
+        imageUrl: imageUrl.trim() || undefined,
         budgetTotal: +c.budgetTotal, budgetLeft: +c.budgetLeft,
         goal: +c.goal, verified: +c.verified,
         rateLabel: c.rateLabel, dripHr: +c.dripPerKViews * 100,
@@ -690,82 +774,259 @@ function CreateCampaignModal({ authToken, onClose, onSuccess }: {
       } as unknown as Campaign);
     } catch (err) {
       setErrMsg((err as Error).message);
-      setState("error");
+      setSaving(false);
     }
   }
 
-  const field = (label: string, value: string, onChange: (v:string)=>void, opts?: { placeholder?: string; type?: string; hint?: string }) => (
-    <div style={{ marginBottom:14 }}>
-      <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>
-        {label}{opts?.hint && <span style={{ marginLeft:8, textTransform:"none", letterSpacing:0, fontFamily:"inherit", color:T.faint, fontSize:10 }}>{opts.hint}</span>}
-      </label>
-      <input value={value} onChange={e=>onChange(e.target.value)} placeholder={opts?.placeholder} type={opts?.type ?? "text"}
-        style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"inherit" }}
-        onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
-        onBlur={e=>(e.target.style.borderColor=T.border)}/>
-    </div>
-  );
+  const inputStyle: React.CSSProperties = {
+    width:"100%", height:48, background:T.el,
+    border:`1px solid ${T.border}`, borderRadius:11,
+    padding:"0 16px", fontSize:15, color:T.fg,
+    outline:"none", fontFamily:"inherit", transition:"border-color 0.2s",
+  };
+
+  const stepLabel = ["Identity", "Budget", "Distribution"][step - 1];
+  const progPct = ((step - 1) / (STEPS - 1)) * 100;
+  const canNext = step === 1 ? step1Valid : step2Valid;
 
   return (
     <motion.div className="fixed inset-0 z-50 flex items-center justify-center"
       initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
-      style={{ background:"rgba(15,17,19,0.92)", backdropFilter:"blur(20px)", padding:"0 16px" }}
-      onClick={e=>e.target===e.currentTarget&&state==="idle"&&onClose()}>
-      <motion.div initial={{ opacity:0, scale:0.95, y:16 }} animate={{ opacity:1, scale:1, y:0 }}
-        exit={{ opacity:0, scale:0.95, y:16 }} transition={{ duration:0.3, ease }}
-        style={{ width:"100%", maxWidth:460, background:T.surface, border:`1px solid ${T.border}`, borderRadius:22, overflow:"hidden", boxShadow:"0 40px 80px -20px rgba(0,0,0,0.7)" }}>
-        <div className="rainbow-bg" style={{ height:2 }}/>
-        <div style={{ padding:26 }}>
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
-            <div>
-              <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Create Campaign</p>
-              <p style={{ fontSize:12, color:T.subtle, marginTop:4 }}>Set up a new creator rewards campaign</p>
-            </div>
-            <button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", fontSize:20, lineHeight:1, padding:4 }}>×</button>
-          </div>
+      style={{ background:"rgba(10,11,14,0.92)", backdropFilter:"blur(28px)", padding:"16px" }}
+      onClick={e => e.target === e.currentTarget && !saving && onClose()}>
+      <motion.div
+        initial={{ opacity:0, scale:0.96, y:20 }}
+        animate={{ opacity:1, scale:1, y:0 }}
+        exit={{ opacity:0, scale:0.96, y:20 }}
+        transition={{ duration:0.3, ease }}
+        style={{ width:"100%", maxWidth:480, background:T.surface, border:`1px solid ${T.border}`, borderRadius:24, overflow:"hidden", boxShadow:"0 60px 120px -24px rgba(0,0,0,0.9)" }}>
 
-          {errMsg && (
-            <motion.div initial={{ opacity:0, y:-6 }} animate={{ opacity:1, y:0 }}
-              style={{ background:"rgba(255,80,80,0.08)", border:"1px solid rgba(255,80,80,0.2)", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-              <p style={{ fontSize:12, color:"#ff7070" }}>{errMsg}</p>
-            </motion.div>
+        {/* Animated progress bar */}
+        <div style={{ height:3, background:T.el, position:"relative" }}>
+          <motion.div className="rainbow-bg"
+            animate={{ width:`${Math.max(4, progPct)}%` }}
+            transition={{ duration:0.4, ease }}
+            style={{ position:"absolute", inset:"0 auto 0 0", height:"100%" }}/>
+        </div>
+
+        {/* Header */}
+        <div style={{ padding:"22px 28px 18px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+          <div>
+            <p style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint, marginBottom:5 }}>
+              Step {step} of {STEPS}
+            </p>
+            <p style={{ fontSize:22, fontWeight:700, color:T.fg, letterSpacing:"-0.02em", lineHeight:1.1, margin:0 }}>
+              {stepLabel}
+            </p>
+          </div>
+          <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            {[1,2,3].map(s => (
+              <div key={s} style={{ width:s===step?22:7, height:7, borderRadius:4, transition:"all 0.3s ease",
+                background:s<step?"rgba(255,255,255,0.5)":s===step?"rgba(255,255,255,0.9)":T.border }}/>
+            ))}
+            <button onClick={onClose} data-cursor-hover style={{ marginLeft:6, background:"none", border:"none", color:T.faint, cursor:"pointer", padding:6, display:"flex", alignItems:"center" }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Step content */}
+        <div style={{ padding:"28px 28px 20px", minHeight:300 }}>
+          <AnimatePresence mode="wait">
+
+            {step === 1 && (
+              <motion.div key="s1"
+                initial={{ opacity:0, x:30 }} animate={{ opacity:1, x:0 }}
+                exit={{ opacity:0, x:-30 }} transition={{ duration:0.2 }}>
+
+                {/* Project name — first */}
+                <div style={{ marginBottom:24 }}>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>Project Name</p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:10, lineHeight:1.5 }}>Full brand name — shown as the campaign title across the platform.</p>
+                  <input value={project} onChange={e => setProject(e.target.value)}
+                    placeholder="e.g. Solana Foundation"
+                    autoFocus
+                    style={inputStyle}
+                    onFocus={e => (e.currentTarget.style.borderColor="rgba(255,255,255,0.3)")}
+                    onBlur={e => (e.currentTarget.style.borderColor=T.border)}/>
+                </div>
+
+                {/* Campaign image — drag & drop upload */}
+                <div>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>Campaign Image <span style={{ fontFamily:"inherit", fontWeight:400, letterSpacing:0, textTransform:"none", color:T.faint, fontSize:11 }}>— optional</span></p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:10, lineHeight:1.5 }}>Shown on your campaign card. Drag & drop or click to upload (max 4MB).</p>
+
+                  {/* Hidden file input */}
+                  <input ref={fileInputRef} type="file" accept="image/*" style={{ display:"none" }}
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleImageFile(f); }}/>
+
+                  {imageUrl ? (
+                    /* Preview state */
+                    <div style={{ position:"relative", borderRadius:14, overflow:"hidden", border:`1px solid ${T.border}`, background:T.el }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={imageUrl} alt="preview" style={{ width:"100%", maxHeight:160, objectFit:"cover", display:"block" }}/>
+                      <div style={{ position:"absolute", inset:0, background:"linear-gradient(to top, rgba(0,0,0,0.55) 0%, transparent 50%)" }}/>
+                      <div style={{ position:"absolute", bottom:0, left:0, right:0, padding:"10px 14px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+                        <span style={{ fontSize:12, color:"rgba(255,255,255,0.75)", fontFamily:"var(--font-geist-mono)", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:"70%" }}>{imgName}</span>
+                        <button onClick={() => { setImageUrl(""); setImgName(""); if (fileInputRef.current) fileInputRef.current.value = ""; }}
+                          style={{ background:"rgba(0,0,0,0.5)", border:"1px solid rgba(255,255,255,0.15)", borderRadius:6, color:"rgba(255,255,255,0.7)", fontSize:11, padding:"3px 8px", cursor:"pointer", fontFamily:"inherit", flexShrink:0 }}>
+                          Remove
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Drop zone */
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                      onDragLeave={() => setDragOver(false)}
+                      onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleImageFile(f); }}
+                      style={{
+                        height:130, borderRadius:14, border:`2px dashed ${dragOver ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.12)"}`,
+                        background: dragOver ? "rgba(255,255,255,0.06)" : "rgba(255,255,255,0.02)",
+                        display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:8,
+                        cursor:"pointer", transition:"all 0.2s", userSelect:"none",
+                      }}>
+                      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                        style={{ color: dragOver ? "rgba(255,255,255,0.7)" : T.faint, transition:"color 0.2s" }}>
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                      </svg>
+                      <p style={{ fontSize:14, color: dragOver ? T.fg : T.subtle, fontWeight:500, margin:0, transition:"color 0.2s" }}>
+                        {dragOver ? "Drop to upload" : "Drag & drop or click to upload"}
+                      </p>
+                      <p style={{ fontSize:12, color:T.faint, margin:0 }}>PNG, JPG, GIF, WebP — max 4MB</p>
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+            {step === 2 && (
+              <motion.div key="s2"
+                initial={{ opacity:0, x:30 }} animate={{ opacity:1, x:0 }}
+                exit={{ opacity:0, x:-30 }} transition={{ duration:0.2 }}>
+
+                <div style={{ marginBottom:26 }}>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>Ticker Symbol</p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:12, lineHeight:1.5 }}>Short token symbol shown on your campaign badge — max 6 characters.</p>
+                  <input value={ticker}
+                    onChange={e => setTicker(e.target.value.toUpperCase().slice(0,6))}
+                    placeholder="SOL"
+                    autoFocus
+                    style={{ ...inputStyle, fontFamily:"var(--font-geist-mono)", letterSpacing:"0.16em", fontSize:20, fontWeight:700, textAlign:"center" }}
+                    onFocus={e => (e.currentTarget.style.borderColor="rgba(255,255,255,0.3)")}
+                    onBlur={e => (e.currentTarget.style.borderColor=T.border)}/>
+                </div>
+
+                <div>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>Budget (DRIP)</p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:12, lineHeight:1.5 }}>Total $DRIP prize pool distributed to creators across this campaign.</p>
+                  <NumInput value={budget} onChange={v => setBudget(Math.max(1, v))} min={1} step={1000}/>
+                </div>
+              </motion.div>
+            )}
+
+            {step === 3 && (
+              <motion.div key="s3"
+                initial={{ opacity:0, x:30 }} animate={{ opacity:1, x:0 }}
+                exit={{ opacity:0, x:-30 }} transition={{ duration:0.2 }}>
+
+                <div style={{ marginBottom:26 }}>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>Impression Goal</p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:12, lineHeight:1.5 }}>Target total views across all creator posts. Campaign closes automatically when reached.</p>
+                  <NumInput value={goal} onChange={v => setGoal(Math.max(1, v))} min={1} step={500000}/>
+                </div>
+
+                <div>
+                  <p style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.13em", color:T.subtle, fontWeight:600, marginBottom:5 }}>DRIP per 1K Views</p>
+                  <p style={{ fontSize:13, color:T.faint, marginBottom:12, lineHeight:1.5 }}>How much $DRIP a creator earns per 1,000 verified impressions on their post.</p>
+                  <NumInput value={dripPerK} onChange={v => setDripPerK(Math.max(0.001, v))} min={0.001} step={0.001}/>
+                  {kPerDrip > 0 && (
+                    <p className="rainbow-text" style={{ fontSize:13, fontFamily:"var(--font-geist-mono)", fontWeight:600, marginTop:10, textAlign:"center" }}>
+                      {kPerDrip.toLocaleString()}K views = 1 DRIP
+                    </p>
+                  )}
+                </div>
+              </motion.div>
+            )}
+
+          </AnimatePresence>
+        </div>
+
+        {/* Error */}
+        {errMsg && (
+          <div style={{ padding:"0 28px 4px" }}>
+            <p style={{ fontSize:13, color:"#ff7070", textAlign:"center" }}>{errMsg}</p>
+          </div>
+        )}
+
+        {/* Footer navigation */}
+        <div style={{ padding:"8px 28px 28px", display:"flex", gap:12 }}>
+          {step > 1 && (
+            <button onClick={() => setStep(s => s-1)} data-cursor-hover
+              style={{ flex:1, height:50, borderRadius:13, border:`1px solid ${T.border}`, background:"none", color:T.subtle, fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"inherit", transition:"all 0.2s" }}
+              onMouseEnter={e => { e.currentTarget.style.borderColor="rgba(255,255,255,0.22)"; e.currentTarget.style.color=T.fg; }}
+              onMouseLeave={e => { e.currentTarget.style.borderColor=T.border; e.currentTarget.style.color=T.subtle; }}>
+              Back
+            </button>
           )}
 
-          {field("Project name", project, setProject, { placeholder:"e.g. Solana Foundation" })}
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
-            <div style={{ marginBottom:14 }}>
-              <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>Ticker</label>
-              <input value={logo} onChange={e=>setLogo(e.target.value.toUpperCase().slice(0,6))} placeholder="SOL"
-                style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"var(--font-geist-mono)", letterSpacing:"0.06em" }}
-                onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
-                onBlur={e=>(e.target.style.borderColor=T.border)}/>
-            </div>
-            {field("Budget (DRIP)", budget, setBudget, { placeholder:"10000", type:"number" })}
-          </div>
-          {field("Impression goal", goal, setGoal, { placeholder:"5000000", type:"number", hint:"total views target" })}
-          <div style={{ marginBottom:22 }}>
-            <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:6 }}>
-              DRIP per 1K views
-              {kPerDrip>0 && <span style={{ marginLeft:8, textTransform:"none", letterSpacing:0, color:"rgba(255,255,255,0.5)", fontSize:10, fontFamily:"inherit" }}>→ {kPerDrip}K views = 1 DRIP</span>}
-            </label>
-            <input value={dripPerK} onChange={e=>setDripPerK(e.target.value)} type="number" step="0.001" min="0.001" placeholder="0.01"
-              style={{ width:"100%", height:42, background:T.el, border:`1px solid ${T.border}`, borderRadius:10, padding:"0 13px", fontSize:13, color:T.fg, outline:"none", fontFamily:"var(--font-geist-mono)" }}
-              onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.3)")}
-              onBlur={e=>(e.target.style.borderColor=T.border)}/>
-          </div>
+          {step < STEPS && (
+            <motion.button
+              onClick={() => canNext && setStep(s => s+1)}
+              disabled={!canNext}
+              whileHover={canNext ? { scale:1.01 } : {}}
+              whileTap={canNext ? { scale:0.99 } : {}}
+              data-cursor-hover
+              style={{ flex:step>1?2:1, height:50, borderRadius:13, border:"none",
+                background:canNext ? "rgba(255,255,255,0.1)" : "rgba(255,255,255,0.04)",
+                color:canNext ? T.fg : T.faint,
+                fontSize:15, fontWeight:600, cursor:canNext ? "pointer" : "not-allowed",
+                fontFamily:"inherit", transition:"background 0.2s" }}>
+              Next →
+            </motion.button>
+          )}
 
-          <button onClick={save} disabled={state==="saving"||!project.trim()||!logo.trim()||!budget||!goal||!dripPerK} data-cursor-hover
-            className={state!=="saving"&&project.trim()&&logo.trim()&&budget&&goal&&dripPerK?"rainbow-bg":""}
-            style={{ width:"100%", height:48, borderRadius:12, border:"none", background:state==="saving"||!project.trim()?"rgba(255,255,255,0.05)":undefined, color:(state!=="saving"&&project.trim()&&logo.trim()&&budget&&goal&&dripPerK)?"#111":"rgba(255,255,255,0.3)", fontWeight:700, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
-            {state==="saving"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Creating…</>):"Launch Campaign"}
-          </button>
+          {step === STEPS && (
+            <motion.button onClick={save} disabled={!canLaunch}
+              whileHover={canLaunch ? { scale:1.02 } : {}}
+              whileTap={canLaunch ? { scale:0.98 } : {}}
+              data-cursor-hover
+              className={canLaunch ? "rainbow-bg" : ""}
+              style={{
+                flex:2, height:58, borderRadius:16, border:"none",
+                background:!canLaunch ? "rgba(255,255,255,0.05)" : undefined,
+                color:canLaunch ? "#080810" : "rgba(255,255,255,0.2)",
+                fontWeight:800, fontSize:18, cursor:canLaunch ? "pointer" : "not-allowed",
+                display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+                fontFamily:"inherit", letterSpacing:"-0.01em",
+                boxShadow:canLaunch ? "0 0 60px rgba(200,190,255,0.45), 0 0 24px rgba(180,210,255,0.3)" : "none",
+                transition:"box-shadow 0.4s",
+              }}>
+              {saving
+                ? <><motion.span animate={{ rotate:360 }} transition={{ duration:0.9, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>&#x27F3;</motion.span> Launching…</>
+                : <span style={{ display:"flex", alignItems:"center", gap:10, letterSpacing:"-0.01em" }}>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink:0 }}>
+                      <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8l7 4-7 4z"/>
+                    </svg>
+                    Launch Campaign
+                  </span>
+              }
+            </motion.button>
+          )}
         </div>
+
       </motion.div>
     </motion.div>
   );
 }
 
-// ─── Submit modal ─────────────────────────────────────────────────────────────
+
+// â”€â”€â”€ Submit modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, authToken, onClose, onSuccess }: {
   joined:string[]; campaigns:Campaign[];
   walletAddress:string; twitterHandle:string; authToken:string;
@@ -815,8 +1076,8 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, authToke
         <div className="rainbow-bg" style={{ height:2 }}/>
         <div style={{ padding:26 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
-            <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Submit Post</p>
-            {state==="idle"&&<button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", fontSize:20, lineHeight:1, padding:4 }}>×</button>}
+            <p style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Submit Post</p>
+            {state==="idle"&&<button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", padding:6, lineHeight:1, display:"flex", alignItems:"center" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
           </div>
 
           {state==="done"?(
@@ -824,31 +1085,31 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, authToke
               <motion.p initial={{ scale:0 }} animate={{ scale:1 }} transition={{ type:"spring", stiffness:220, damping:14 }}
                 className="rainbow-text" style={{ fontSize:48, marginBottom:12 }}>✓</motion.p>
               <p style={{ fontWeight:700, fontSize:17, color:T.fg, marginBottom:4 }}>Post verified</p>
-              <p style={{ fontSize:13, color:T.subtle }}>Earning DRIP now</p>
+              <p style={{ fontSize:15, color:T.subtle }}>Earning DRIP now</p>
             </div>
           ):(
             <>
               {state==="error"&&errMsg&&(
                 <motion.div initial={{ opacity:0, y:-6 }} animate={{ opacity:1, y:0 }}
                   style={{ background:"rgba(255,80,80,0.08)", border:"1px solid rgba(255,80,80,0.2)", borderRadius:10, padding:"10px 14px", marginBottom:14 }}>
-                  <p style={{ fontSize:12, color:"#ff7070", lineHeight:1.5 }}>{errMsg}</p>
+                  <p style={{ fontSize:14, color:"#ff7070", lineHeight:1.5 }}>{errMsg}</p>
                 </motion.div>
               )}
               <div style={{ marginBottom:14 }}>
-                <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:7 }}>Tweet URL</label>
+                <label style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:7 }}>Tweet URL</label>
                 <input value={url} onChange={e=>{setUrl(e.target.value);if(state==="error")setState("idle");}} placeholder="https://x.com/handle/status/..."
-                  style={{ width:"100%", height:44, background:T.el, border:`1px solid ${state==="error"?"rgba(255,80,80,0.35)":T.border}`, borderRadius:11, padding:"0 14px", fontSize:13, color:T.fg, outline:"none", transition:"border-color 0.2s", fontFamily:"inherit" }}
+                  style={{ width:"100%", height:48, background:T.el, border:`1px solid ${state==="error"?"rgba(255,80,80,0.35)":T.border}`, borderRadius:11, padding:"0 14px", fontSize:15, color:T.fg, outline:"none", transition:"border-color 0.2s", fontFamily:"inherit" }}
                   onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.35)")}
                   onBlur={e=>(e.target.style.borderColor=state==="error"?"rgba(255,80,80,0.35)":T.border)}/>
               </div>
               <div style={{ marginBottom:22 }}>
-                <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:7 }}>Campaign</label>
+                <label style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:7 }}>Campaign</label>
                 <Select options={options} value={campaign} onChange={setCampaign} placeholder="Select campaign..."/>
               </div>
               <button onClick={submit} disabled={!url.trim()||state==="verifying"} data-cursor-hover
                 className={url.trim()&&state!=="verifying"?"rainbow-bg":""}
                 style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:url.trim()&&state!=="verifying"?"#111":"#fff", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
-                {state==="verifying"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Verifying on X…</>):state==="error"?"Try Again":"Verify & Submit"}
+                {state==="verifying"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>âŸ³</motion.span>Verifying on X…</>):state==="error"?"Try Again":"Verify & Submit"}
               </button>
             </>
           )}
@@ -858,7 +1119,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, authToke
   );
 }
 
-// ─── Claim modal ──────────────────────────────────────────────────────────────
+// â”€â”€â”€ Claim modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClose:()=>void; onConfirm:()=>void }) {
   const [state, setState] = useState<ClaimState>("idle");
 
@@ -880,8 +1141,8 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
         <div className="rainbow-bg" style={{ height:2 }}/>
         <div style={{ padding:28 }}>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:22 }}>
-            <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Claim Rewards</p>
-            {state==="idle"&&<button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", fontSize:20, lineHeight:1, padding:4 }}>×</button>}
+            <p style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.15em", color:T.faint }}>Claim Rewards</p>
+            {state==="idle"&&<button onClick={onClose} data-cursor-hover style={{ background:"none", border:"none", color:T.faint, cursor:"pointer", padding:6, lineHeight:1, display:"flex", alignItems:"center" }}><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>}
           </div>
 
           {state==="confirmed"?(
@@ -889,20 +1150,20 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
               <motion.p initial={{ scale:0 }} animate={{ scale:1 }} transition={{ type:"spring", stiffness:220, damping:14 }}
                 className="rainbow-text" style={{ fontSize:52, marginBottom:14 }}>✓</motion.p>
               <p style={{ fontWeight:700, fontSize:20, color:T.fg, marginBottom:6 }}>Claimed!</p>
-              <p style={{ fontSize:13, color:T.subtle }}>{fmt(claimable)} DRIP sent to your wallet</p>
+              <p style={{ fontSize:15, color:T.subtle }}>{fmt(claimable)} DRIP sent to your wallet</p>
             </div>
           ):(
             <>
               <div style={{ background:T.el, border:`1px solid ${T.border}`, borderRadius:16, padding:"20px 22px", marginBottom:16 }}>
-                <p style={{ fontSize:11, color:T.subtle, marginBottom:6 }}>Claiming</p>
+                <p style={{ fontSize:15, color:T.subtle, marginBottom:6 }}>Claiming</p>
                 <p className="rainbow-text" style={{ fontSize:44, fontWeight:700, lineHeight:1, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em" }}>{fmt(claimable)}</p>
-                <p style={{ fontSize:13, color:T.faint, marginTop:6, fontFamily:"var(--font-geist-mono)" }}>DRIP · ≈ ${fmt(claimable*DRIP_PRICE)} USD</p>
+                <p style={{ fontSize:15, color:T.faint, marginTop:6, fontFamily:"var(--font-geist-mono)" }}>DRIP Â· â‰ˆ ${fmt(claimable*DRIP_PRICE)} USD</p>
               </div>
               <div style={{ background:T.el, borderRadius:12, padding:"12px 16px", marginBottom:20 }}>
                 {[["Network","Solana"],["Fee","< $0.01"],["Settlement","~2 sec"]].map(([l,v],i)=>(
                   <div key={l} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingTop:i>0?10:0, marginTop:i>0?10:0, borderTop:i>0?`1px solid ${T.border}`:"none" }}>
-                    <span style={{ fontSize:12, color:T.subtle }}>{l}</span>
-                    <span style={{ fontSize:12, color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>{v}</span>
+                    <span style={{ fontSize:14, color:T.subtle }}>{l}</span>
+                    <span style={{ fontSize:14, color:T.fg, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>{v}</span>
                   </div>
                 ))}
               </div>
@@ -910,8 +1171,8 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
                 className={state==="idle"?"rainbow-bg":""}
                 style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:state==="idle"?"#111":"#fff", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
                 {state==="idle"&&"Sign & Claim"}
-                {state==="signing"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Signing...</>}
-                {state==="submitting"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Submitting to Solana...</>}
+                {state==="signing"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>âŸ³</motion.span>Signing...</>}
+                {state==="submitting"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>âŸ³</motion.span>Submitting to Solana...</>}
               </button>
             </>
           )}
@@ -921,7 +1182,7 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
   );
 }
 
-// ─── Nav ──────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Nav â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, twitterHandle }: {
   claimable:number; fillPct:number; onClaim:()=>void; onSubmit:()=>void; onLogout:()=>void;
   walletAddress:string; twitterHandle:string;
@@ -940,10 +1201,9 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
 
       <header style={{
         position:"fixed", top:2, left:0, right:0, zIndex:50, height:58,
-        background: scrolled ? `${T.bg}f0` : "transparent",
-        backdropFilter: scrolled ? "blur(24px)" : "none",
-        borderBottom:`1px solid ${scrolled?T.border:"transparent"}`,
-        transition:"background 0.35s, backdrop-filter 0.35s, border-color 0.35s",
+        background: `${T.bg}f2`,
+        backdropFilter: "blur(24px)",
+        borderBottom:`1px solid ${T.border}`,
         display:"flex", alignItems:"center",
       }}>
         <div style={{ width:"100%", maxWidth:1200, margin:"0 auto", padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between" }}>
@@ -951,14 +1211,14 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
           {/* Logo */}
           <a href="#vault" data-cursor-hover style={{ display:"flex", alignItems:"center", gap:8, textDecoration:"none" }}>
             <Image src="/logos/DripLogo.png" alt="DRIP" width={52} height={40} style={{ objectFit:"contain" }}/>
-            <span style={{ fontSize:9, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, border:`1px solid ${T.border}`, borderRadius:4, padding:"2px 6px", letterSpacing:"0.1em", textTransform:"uppercase" }}>beta</span>
+            <span style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, border:`1px solid ${T.border}`, borderRadius:4, padding:"2px 6px", letterSpacing:"0.1em", textTransform:"uppercase" }}>beta</span>
           </a>
 
           {/* Nav links */}
           <nav className="nav-links" style={{ display:"flex", alignItems:"center", gap:2 }}>
             {[["#campaigns","Campaigns"],["#feed","Feed"]].map(([href,label])=>(
               <a key={href} href={href} data-cursor-hover
-                style={{ padding:"6px 12px", borderRadius:8, fontSize:13, color:T.subtle, textDecoration:"none", transition:"color 0.2s", fontWeight:500 }}
+                style={{ padding:"6px 12px", borderRadius:8, fontSize:15, color:T.subtle, textDecoration:"none", transition:"color 0.2s", fontWeight:500 }}
                 onMouseEnter={e=>(e.currentTarget.style.color=T.fg)}
                 onMouseLeave={e=>(e.currentTarget.style.color=T.subtle)}>
                 {label}
@@ -971,13 +1231,13 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
             {/* Account pills */}
             <div className="nav-account" style={{ display:"flex", alignItems:"center", gap:8 }}>
               {twitterHandle && (
-                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:12, color:T.subtle }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle }}>
                   <svg width="10" height="10" viewBox="0 0 24 24" fill={T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
                   <span style={{ fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>@{twitterHandle}</span>
                 </div>
               )}
               {walletAddress && (
-                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:12, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:6, padding:"5px 11px", background:T.el, border:`1px solid ${T.border}`, borderRadius:9, fontSize:14, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>
                   <span className="rainbow-bg" style={{ display:"inline-flex", width:6, height:6, borderRadius:"50%", flexShrink:0 }}/>
                   {walletAddress.slice(0,6)}…{walletAddress.slice(-4)}
                 </div>
@@ -985,14 +1245,14 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
             </div>
 
             <button onClick={onSubmit} data-cursor-hover
-              style={{ height:34, padding:"0 13px", borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, fontWeight:600, display:"flex", alignItems:"center", gap:4, transition:"color 0.2s, border-color 0.2s", fontFamily:"inherit" }}
+              style={{ height:38, padding:"0 13px", borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, fontWeight:600, display:"flex", alignItems:"center", gap:4, transition:"color 0.2s, border-color 0.2s", fontFamily:"inherit" }}
               onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color=T.fg; (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
               onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
               <span style={{ fontSize:15, lineHeight:1 }}>+</span> Post
             </button>
 
             <button onClick={onLogout} data-cursor-hover title="Log out"
-              style={{ height:34, width:34, borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, display:"flex", alignItems:"center", justifyContent:"center", transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
+              style={{ height:38, width:34, borderRadius:8, cursor:"pointer", border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, display:"flex", alignItems:"center", justifyContent:"center", transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
               onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color="#ff5555"; (e.currentTarget as HTMLElement).style.borderColor="#ff5555"; }}
               onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1006,7 +1266,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
                   initial={{ opacity:0, scale:0.88 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.88 }}
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   className="rainbow-bg"
-                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#111", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
+                  style={{ height:38, padding:"0 14px", borderRadius:8, border:"none", color:"#111", fontWeight:700, fontSize:14, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
                   Claim {fmt(claimable,0)} DRIP
                 </motion.button>
               )}
@@ -1018,7 +1278,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
   );
 }
 
-// ─── Landing ──────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Landing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Landing({ onDone }: { onDone: (handle: string, token: string) => void }) {
   const { publicKey, connected } = useWallet();
   const [showWalletModal, setShowWalletModal] = useState(false);
@@ -1089,7 +1349,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
         {authError && (
           <motion.div initial={{ opacity:0, y:-8 }} animate={{ opacity:1, y:0 }}
             style={{ background:"rgba(255,80,80,0.08)", border:"1px solid rgba(255,80,80,0.2)", borderRadius:12, padding:"10px 16px", marginBottom:16 }}>
-            <p style={{ fontSize:13, color:"#ff7070" }}>{authError}</p>
+            <p style={{ fontSize:15, color:"#ff7070" }}>{authError}</p>
           </motion.div>
         )}
 
@@ -1105,9 +1365,9 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
                 <span style={{ fontSize:14, fontWeight:600, color:xDone?T.fg:T.subtle }}>Sign in with X</span>
               </div>
               {xDone
-                ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{xHandle}</span>
+                ? <span className="rainbow-text" style={{ fontSize:14, fontWeight:700 }}>✓ @{xHandle}</span>
                 : <button data-cursor-hover onClick={signInWithX} className="rainbow-bg"
-                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit" }}>
                     Connect
                   </button>
               }
@@ -1119,21 +1379,21 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
                 <div style={{ width:15, height:15, borderRadius:4, background:wDone?"rgba(255,255,255,0.85)":T.faint, transition:"background 0.4s" }}/>
                 <span style={{ fontSize:14, fontWeight:600, color:wDone?T.fg:T.subtle }}>Connect Phantom Wallet</span>
               </div>
-              {!xDone && <span style={{ fontSize:11, color:T.faint }}>Sign in with X first</span>}
+              {!xDone && <span style={{ fontSize:15, color:T.faint }}>Sign in with X first</span>}
               {xDone && !wDone && (
                 <button data-cursor-hover onClick={() => setShowWalletModal(true)} className="rainbow-bg"
-                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#111", fontWeight:700, fontSize:15, cursor:"pointer", fontFamily:"inherit" }}>
                   Connect
                 </button>
               )}
-              {wDone && <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ {publicKey!.toString().slice(0,6)}…{publicKey!.toString().slice(-4)}</span>}
+              {wDone && <span className="rainbow-text" style={{ fontSize:14, fontWeight:700 }}>✓ {publicKey!.toString().slice(0,6)}…{publicKey!.toString().slice(-4)}</span>}
             </div>
           </div>
           </HoloCard>
         </motion.div>
 
         <motion.p initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:0.4 }}
-          style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>
+          style={{ fontSize:15, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>
           Your keys. Your vault. Non-custodial.
         </motion.p>
       </div>
@@ -1143,7 +1403,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
   );
 }
 
-// ─── Custom cursor ────────────────────────────────────────────────────────────
+// â”€â”€â”€ Custom cursor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function Cursor() {
   const dotRef  = useRef<HTMLDivElement>(null);
   const ringRef = useRef<HTMLDivElement>(null);
@@ -1172,7 +1432,7 @@ function Cursor() {
   );
 }
 
-// ─── Main app ─────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Main app â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { walletAddress: string; twitterHandle: string; authToken: string; onLogout: () => void }) {
   const [balance,   setBalance]   = useState(0);
   const [claimable, setClaimable] = useState(0);
@@ -1234,12 +1494,6 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
   const totalRate = Array.from(joined).reduce((s,id)=>s+(campaigns.find(c=>c.id===id)?.dripHr??0),0);
   const active    = totalRate > 0;
 
-  // Parallax on hero scroll-out
-  const heroRef = useRef<HTMLElement>(null);
-  const { scrollYProgress } = useScroll({ target:heroRef, offset:["start start","end start"] });
-  const heroY       = useTransform(scrollYProgress,[0,1],[0,-110]);
-  const heroOpacity = useTransform(scrollYProgress,[0,0.55],[1,0]);
-
   // Drip engine
   useEffect(()=>{
     if(!active) return;
@@ -1284,267 +1538,175 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
     <>
       <Nav claimable={claimable} fillPct={fillPct} onClaim={()=>setShowClaim(true)} onSubmit={()=>setShowPost(true)} onLogout={onLogout} walletAddress={walletAddress} twitterHandle={twitterHandle}/>
 
-      {/* ════ HERO — two-panel: vault left, stats right ════ */}
-      <section ref={heroRef} id="vault" style={{ minHeight:"100vh", position:"relative", display:"flex", flexDirection:"column", justifyContent:"center", paddingTop:72, paddingBottom:44, overflow:"hidden" }}>
+      {/* ════ 3-COLUMN FIXED DASHBOARD ════ */}
+      <div style={{ position:"fixed", top:NAV_H, left:0, right:0, bottom:0, display:"flex", overflow:"hidden", background:T.bg }}>
 
-        {/* Ambient bg */}
-        <div style={{ position:"absolute", inset:0, pointerEvents:"none" }}>
-          <div className="animate-drift"       style={{ position:"absolute", left:"-18%", top:"5%",   width:700, height:700, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)" }}/>
-          <div className="animate-drift-delay" style={{ position:"absolute", right:"-14%",top:"15%",  width:600, height:600, borderRadius:"50%", background:"rgba(180,180,200,0.04)", filter:"blur(140px)" }}/>
-          <div className="animate-drift-slow"  style={{ position:"absolute", bottom:"-5%",left:"35%", width:480, height:480, borderRadius:"50%", background:"rgba(200,200,220,0.03)",  filter:"blur(130px)" }}/>
-          <div className="noise-overlay-dark" style={{ position:"absolute", inset:0, opacity:0.35 }}/>
-        </div>
+        {/* LEFT: Vault (300px) */}
+        <div style={{ width:300, flexShrink:0, borderRight:`1px solid ${T.border}`, display:"flex", flexDirection:"column", overflowY:"auto", overflowX:"hidden" }}>
 
-        <motion.div style={{ y:heroY, opacity:heroOpacity, position:"relative", zIndex:1, flex:1, display:"flex", alignItems:"center" }}>
-          <div style={{ width:"100%", maxWidth:1200, margin:"0 auto", padding:"0 24px", display:"grid", gridTemplateColumns:"1fr 1fr", gap:48, alignItems:"center" }} className="hero-grid">
-
-            {/* ── Left: Vault ── */}
-            <motion.div initial={{ opacity:0, x:-30 }} animate={{ opacity:1, x:0 }} transition={{ duration:0.8, ease }} style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:24 }}>
-              {/* Live badge */}
-              <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"6px 14px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)", alignSelf:"center" }}>
-                <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
+          {/* Row 1 — header */}
+          <div style={{ height:56, flexShrink:0, borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px" }}>
+            <span style={{ fontSize:15, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint }}>Your Vault</span>
+            {active && (
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <span style={{ position:"relative", display:"inline-flex", width:5, height:5, flexShrink:0 }}>
                   <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.5 }}/>
-                  <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
+                  <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:5, height:5, borderRadius:"50%" }}/>
                 </span>
-                <span style={{ fontSize:11, color:T.subtle, fontFamily:"var(--font-geist-mono)" }}>{campaigns.length} campaigns live</span>
+                <span className="rainbow-text" style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>DRIPPING</span>
               </div>
-
-              {/* Vault widget */}
-              <div style={{ position:"relative" }}>
-                <div className="animate-drift-slow" style={{
-                  position:"absolute", width:380, height:380, borderRadius:"50%",
-                  background:`rgba(255,255,255,${active?0.07:0.025})`,
-                  filter:"blur(90px)", left:"50%", top:"50%",
-                  transform:"translate(-50%,-50%)",
-                  pointerEvents:"none", transition:"background 1.5s ease",
-                }}/>
-                <div className="vault-scale-wrapper">
-                  <HoloCard borderRadius={28} style={{ display:"inline-block" }}>
-                    <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
-                  </HoloCard>
-                </div>
-              </div>
-            </motion.div>
-
-            {/* ── Right: Stats + CTAs ── */}
-            <motion.div initial={{ opacity:0, x:30 }} animate={{ opacity:1, x:0 }} transition={{ duration:0.8, ease, delay:0.1 }} style={{ display:"flex", flexDirection:"column", gap:28 }}>
-
-              {/* Balance */}
-              <div>
-                <p style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint, marginBottom:10 }}>Your Vault</p>
-                <div style={{ lineHeight:1, marginBottom:8 }}>
-                  <span className="rainbow-text" style={{ fontSize:"clamp(2.8rem,5.5vw,4.5rem)", fontWeight:800, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.04em" }}>
-                    <AnimNum value={balance} d={2}/>
-                  </span>
-                  <span style={{ fontSize:16, color:T.faint, fontFamily:"var(--font-geist-mono)", marginLeft:10 }}>DRIP</span>
-                </div>
-                <p style={{ fontSize:14, color:T.subtle }}>≈ ${fmt(balance*DRIP_PRICE)} USD</p>
-              </div>
-
-              {/* Rate + fill cards */}
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
-                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Earn rate</p>
-                  {active?(
-                    <p className="rainbow-text" style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em" }}>+{fmt(totalRate,1)}<span style={{ fontSize:12, marginLeft:4 }}>DRIP/hr</span></p>
-                  ):(
-                    <p style={{ fontSize:14, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>Not earning</p>
-                  )}
-                </HoloCard>
-                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
-                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Claimable</p>
-                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:claimable>0.1?"#F4F4F8":T.faint }}>
-                    {fmt(claimable,2)} <span style={{ fontSize:12 }}>DRIP</span>
-                  </p>
-                </HoloCard>
-                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
-                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Campaigns</p>
-                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:T.fg }}>{joined.size} <span style={{ fontSize:12, color:T.faint }}>active</span></p>
-                </HoloCard>
-                <HoloCard borderRadius={14} style={{ padding:"16px 18px", background:T.surface }}>
-                  <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.14em", color:T.faint, marginBottom:6 }}>Posts</p>
-                  <p style={{ fontSize:20, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:T.fg }}>{posts.length} <span style={{ fontSize:12, color:T.faint }}>tracked</span></p>
-                </HoloCard>
-              </div>
-
-              {/* Status pill */}
-              <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"8px 16px", borderRadius:9999, background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.1)", backdropFilter:"blur(8px)", alignSelf:"flex-start" }}>
-                {active?(
-                  <>
-                    <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
-                      <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.55 }}/>
-                      <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
-                    </span>
-                    <span className="rainbow-text" style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", fontWeight:600 }}>
-                      Dripping now — {joined.size} {joined.size===1?"campaign":"campaigns"} active
-                    </span>
-                  </>
-                ):(
-                  <span style={{ fontSize:12, fontFamily:"var(--font-geist-mono)", color:T.faint }}>Join a campaign to start earning</span>
-                )}
-              </div>
-
-              {/* CTAs */}
-              <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                <motion.button
-                  onClick={()=>claimable>0.1&&setShowClaim(true)}
-                  disabled={claimable<=0.1}
-                  whileHover={claimable>0.1?{ scale:1.02 }:{}}
-                  whileTap={claimable>0.1?{ scale:0.97 }:{}}
-                  data-cursor-hover
-                  className={claimable>0.1?"rainbow-bg":""}
-                  style={{ height:48, padding:"0 24px", borderRadius:12, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:claimable>0.1?"#111":"rgba(255,255,255,0.25)", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 50px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
-                  {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
-                </motion.button>
-                <motion.button
-                  onClick={()=>setShowPost(true)}
-                  whileHover={{ scale:1.02 }} whileTap={{ scale:0.97 }}
-                  data-cursor-hover
-                  style={{ height:48, padding:"0 22px", borderRadius:12, border:`1px solid ${T.border}`, background:T.el, color:T.fg, fontWeight:600, fontSize:14, cursor:"pointer", display:"flex", alignItems:"center", gap:8, fontFamily:"inherit", transition:"border-color 0.2s" }}
-                  onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
-                  onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
-                  <span style={{ fontSize:18, lineHeight:1 }}>+</span> Submit Post
-                </motion.button>
-              </div>
-            </motion.div>
+            )}
           </div>
-        </motion.div>
 
-        {/* Ticker */}
-        <div style={{ position:"absolute", bottom:0, left:0, right:0, height:44, overflow:"hidden", borderTop:`1px solid ${T.border}`, background:`${T.bg}cc`, backdropFilter:"blur(8px)", zIndex:1 }}>
-          <Ticker/>
-        </div>
-      </section>
+          {/* Row 2 — vault animation (fixed height, vault scaled inside) */}
+          <div style={{ flexShrink:0, borderBottom:`1px solid ${T.border}` }}>
+            <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
+          </div>
 
-      {/* ════ MAIN CONTENT GRID — campaigns left, activity right ════ */}
-      <section id="campaigns" style={{ padding:"80px 0 80px", background:T.bg, borderTop:`1px solid ${T.border}` }}>
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px" }}>
-          <div style={{ display:"grid", gridTemplateColumns:"1fr 360px", gap:40, alignItems:"start" }} className="content-grid">
+          {/* Row 3 — balance */}
+          <div style={{ flexShrink:0, borderBottom:`1px solid ${T.border}`, padding:"14px 20px", textAlign:"center" }}>
+            <div style={{ display:"flex", alignItems:"baseline", justifyContent:"center", gap:8, marginBottom:4 }}>
+              <span className="rainbow-text" style={{ fontSize:28, fontWeight:800, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.04em", lineHeight:1 }}>
+                <AnimNum value={balance} d={2}/>
+              </span>
+              <span style={{ fontSize:15, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>DRIP</span>
+            </div>
+            <p style={{ fontSize:14, color:T.faint }}>≈ ${fmt(balance*DRIP_PRICE)} USD</p>
+          </div>
 
-            {/* ── Campaigns ── */}
-            <div>
-              <Reveal>
-                <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:36, flexWrap:"wrap", gap:12 }}>
-                  <div>
-                    <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>01 — Campaigns</p>
-                    <h2 style={{ fontSize:"clamp(1.8rem,3.5vw,2.6rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.95, margin:0 }}>
-                      Join a <span className="rainbow-text">Campaign</span>
-                    </h2>
-                  </div>
-                  <button onClick={()=>setShowCreateCampaign(true)} data-cursor-hover
-                    style={{ height:36, padding:"0 16px", borderRadius:9, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:6, transition:"color 0.2s, border-color 0.2s", flexShrink:0 }}
-                    onMouseEnter={e=>{ (e.currentTarget as HTMLElement).style.color=T.fg; (e.currentTarget as HTMLElement).style.borderColor=T.faint; }}
-                    onMouseLeave={e=>{ (e.currentTarget as HTMLElement).style.color=T.subtle; (e.currentTarget as HTMLElement).style.borderColor=T.border; }}>
-                    <span style={{ fontSize:16, lineHeight:1 }}>+</span> Create Campaign
-                  </button>
-                </div>
-              </Reveal>
-              <div className="campaign-grid">
-                {campaigns.length>0
-                  ? campaigns.map((c,i)=>(
-                      <CampaignCard key={c.id} c={c} joined={joined.has(c.id)} onToggle={()=>toggleCampaign(c.id)} earning={joined.has(c.id)&&active} index={i}/>
-                    ))
-                  : (
-                    <div style={{ gridColumn:"1/-1", padding:"56px 24px", borderRadius:16, border:`1px dashed ${T.border}`, textAlign:"center" }}>
-                      <p style={{ fontSize:13, color:T.faint }}>No campaigns live yet. Check back soon.</p>
-                    </div>
-                  )
-                }
+          {/* Row 4 — 2×2 stats */}
+          <div style={{ flexShrink:0, display:"grid", gridTemplateColumns:"1fr 1fr", borderBottom:`1px solid ${T.border}` }}>
+            {([
+              { label:"Earn rate", val: active ? `+${fmt(totalRate,1)}` : "—", sub: active ? "DRIP/hr" : "" },
+              { label:"Claimable", val: fmt(claimable,2), sub: "DRIP" },
+              { label:"Campaigns", val: `${joined.size}`, sub: "active" },
+              { label:"Posts",     val: `${posts.length}`, sub: "tracked" },
+            ] as {label:string;val:string;sub:string}[]).map((s,i)=>(
+              <div key={s.label} style={{ padding:"12px 14px", textAlign:"center", borderRight: i%2===0 ? `1px solid ${T.border}` : "none", borderBottom: i<2 ? `1px solid ${T.border}` : "none" }}>
+                <p style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, marginBottom:4 }}>{s.label}</p>
+                <p style={{ fontSize:18, fontWeight:700, fontFamily:"var(--font-geist-mono)", letterSpacing:"-0.02em", color:T.fg, lineHeight:1 }}>{s.val}</p>
+                {s.sub && <p style={{ fontSize:14, color:T.faint, fontFamily:"var(--font-geist-mono)", marginTop:2 }}>{s.sub}</p>}
               </div>
-            </div>
+            ))}
+          </div>
 
-            {/* ── Sticky Activity Sidebar ── */}
-            <div style={{ position:"sticky", top:80, display:"flex", flexDirection:"column", gap:16 }}>
-
-              {/* Your posts */}
-              <HoloCard borderRadius={18} style={{ background:T.surface, overflow:"hidden" }}>
-                <div className="rainbow-bg" style={{ height:2 }}/>
-                <div style={{ padding:"20px 20px 0" }}>
-                  <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
-                    <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint }}>Your Posts</p>
-                    <button onClick={()=>setShowPost(true)} data-cursor-hover
-                      style={{ height:26, padding:"0 10px", borderRadius:6, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4 }}>
-                      <span style={{ fontSize:14, lineHeight:1 }}>+</span> New
-                    </button>
-                  </div>
-                </div>
-                <div style={{ padding:"0 20px 20px", display:"flex", flexDirection:"column", gap:8 }}>
-                  {posts.length>0
-                    ? posts.slice(0,4).map(p=><PostCard key={p.id} post={p}/>)
-                    : (
-                      <div style={{ padding:"28px 0", textAlign:"center" }}>
-                        <p style={{ fontSize:12, color:T.faint, marginBottom:12, lineHeight:1.6 }}>No posts yet.<br/>Join a campaign and submit your tweet.</p>
-                        <button onClick={()=>setShowPost(true)} data-cursor-hover
-                          style={{ height:32, padding:"0 14px", borderRadius:8, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:11, fontWeight:600, cursor:"pointer", fontFamily:"inherit" }}>
-                          Submit Post
-                        </button>
-                      </div>
-                    )
-                  }
-                  {posts.length>4&&(
-                    <p style={{ fontSize:11, color:T.faint, textAlign:"center", fontFamily:"var(--font-geist-mono)", paddingTop:4 }}>+{posts.length-4} more posts</p>
-                  )}
-                </div>
-              </HoloCard>
-
-              {/* Stats summary */}
-              <HoloCard borderRadius={18} style={{ background:T.surface, padding:"20px" }}>
-                <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.16em", color:T.faint, marginBottom:14 }}>Totals</p>
-                <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-                  {[
-                    { label:"Lifetime earned", value:`${fmt(balance,2)} DRIP` },
-                    { label:"USD value",        value:`$${fmt(balance*DRIP_PRICE,2)}` },
-                    { label:"Active campaigns", value:`${joined.size}` },
-                    { label:"Earn rate",        value:active?`${fmt(totalRate,1)} DRIP/hr`:"—" },
-                  ].map(row=>(
-                    <div key={row.label} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", paddingBottom:12, borderBottom:`1px solid ${T.border}` }}>
-                      <span style={{ fontSize:12, color:T.subtle }}>{row.label}</span>
-                      <span style={{ fontSize:13, fontWeight:600, fontFamily:"var(--font-geist-mono)", color:T.fg }}>{row.value}</span>
-                    </div>
-                  ))}
-                </div>
-              </HoloCard>
-            </div>
+          {/* Row 5 — claim button */}
+          <div style={{ flex:1, padding:"14px 20px", display:"flex", flexDirection:"column", justifyContent:"flex-end", gap:8 }}>
+            {!active && <p style={{ fontSize:15, fontFamily:"var(--font-geist-mono)", color:T.faint, textAlign:"center" }}>Join a campaign to start earning</p>}
+            <motion.button
+              onClick={()=>claimable>0.1&&setShowClaim(true)}
+              disabled={claimable<=0.1}
+              whileHover={claimable>0.1?{ scale:1.02 }:{}}
+              whileTap={claimable>0.1?{ scale:0.97 }:{}}
+              data-cursor-hover
+              className={claimable>0.1?"rainbow-bg":""}
+              style={{ width:"100%", height:48, borderRadius:10, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.05)":undefined, color:claimable>0.1?"#111":"rgba(255,255,255,0.18)", fontWeight:700, fontSize:15, cursor:claimable>0.1?"pointer":"not-allowed", fontFamily:"inherit", boxShadow:claimable>0.1?"0 0 40px -10px rgba(255,255,255,0.3)":"none" }}>
+              {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
+            </motion.button>
           </div>
         </div>
-      </section>
 
-      {/* ════ LIVE FEED ════ */}
-      <section id="feed" style={{ padding:"72px 0 96px", background:T.surface, borderTop:`1px solid ${T.border}` }}>
-        <div style={{ maxWidth:1200, margin:"0 auto", padding:"0 24px" }}>
-          <Reveal>
-            <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:32, flexWrap:"wrap", gap:12 }}>
-              <div>
-                <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:10 }}>02 — Community</p>
-                <h2 style={{ fontSize:"clamp(1.8rem,3.5vw,2.6rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.95, margin:0 }}>
-                  Live <span className="rainbow-text">Feed</span>
-                </h2>
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:7, paddingBottom:4 }}>
-                <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
-                  <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.6 }}/>
-                  <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
-                </span>
-                <span className="rainbow-text" style={{ fontSize:11, fontFamily:"var(--font-geist-mono)", fontWeight:600, letterSpacing:"0.08em" }}>LIVE</span>
-              </div>
+        {/* CENTER: Campaigns (flex: 1) */}
+        <div style={{ flex:1, display:"flex", flexDirection:"column", minWidth:0, overflow:"hidden" }}>
+
+          {/* Header — same 56px height */}
+          <div style={{ height:56, flexShrink:0, borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 24px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:15, fontWeight:700, color:T.fg }}>Campaigns</span>
+              <span style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", color:T.faint, background:T.el, padding:"3px 9px", borderRadius:20, border:`1px solid ${T.border}` }}>{campaigns.length} live</span>
             </div>
-          </Reveal>
-          <Reveal delay={0.1}>
-            <CommunityFeed/>
-          </Reveal>
-        </div>
-      </section>
-
-      {/* ════ FOOTER ════ */}
-      <footer style={{ background:T.bg, borderTop:`1px solid ${T.border}`, padding:"24px" }}>
-        <div style={{ maxWidth:1200, margin:"0 auto", display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-            <Image src="/logos/DripLogo.png" alt="DRIP" width={40} height={32} style={{ objectFit:"contain" }}/>
-            <span style={{ fontSize:12, color:T.faint }}>Web3 creator rewards on Solana.</span>
+            <div style={{ display:"flex", gap:8 }}>
+              {([
+                { label:"Submit Post", onClick:()=>setShowPost(true) },
+                { label:"Create Campaign", onClick:()=>setShowCreateCampaign(true) },
+              ] as {label:string;onClick:()=>void}[]).map(btn=>(
+                <button key={btn.label} onClick={btn.onClick} data-cursor-hover
+                  style={{ height:36, padding:"0 14px", borderRadius:8, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:5, transition:"all 0.2s" }}
+                  onMouseEnter={e=>{ const el=e.currentTarget; el.style.color=T.fg; el.style.borderColor=T.faint; el.style.background="rgba(255,255,255,0.07)"; }}
+                  onMouseLeave={e=>{ const el=e.currentTarget; el.style.color=T.subtle; el.style.borderColor=T.border; el.style.background=T.el; }}>
+                  + {btn.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)" }}>Non-custodial · Your keys · Your vault</p>
+
+          {/* Scrollable campaign grid */}
+          <div style={{ flex:1, overflowY:"auto", padding:"20px 24px" }}>
+            {campaigns.length>0 ? (
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))", gap:16 }}>
+                {campaigns.map((c,i)=>(
+                  <CampaignCard key={c.id} c={c} joined={joined.has(c.id)} onToggle={()=>toggleCampaign(c.id)} earning={joined.has(c.id)&&active} index={i}/>
+                ))}
+              </div>
+            ) : (
+              <div style={{ height:"100%", display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:14 }}>
+                <p style={{ fontSize:15, color:T.faint }}>No campaigns live yet.</p>
+                <button onClick={()=>setShowCreateCampaign(true)} data-cursor-hover
+                  style={{ height:36, padding:"0 18px", borderRadius:9, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:14, fontWeight:600, cursor:"pointer", fontFamily:"inherit", transition:"all 0.2s" }}
+                  onMouseEnter={e=>{ const el=e.currentTarget; el.style.color=T.fg; el.style.borderColor=T.faint; }}
+                  onMouseLeave={e=>{ const el=e.currentTarget; el.style.color=T.subtle; el.style.borderColor=T.border; }}>
+                  + Create the first one
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-      </footer>
+
+        {/* RIGHT: Activity (280px) */}
+        <div style={{ width:280, flexShrink:0, borderLeft:`1px solid ${T.border}`, display:"flex", flexDirection:"column", overflow:"hidden" }}>
+
+          {/* Header — same 56px height */}
+          <div style={{ height:56, flexShrink:0, borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px" }}>
+            <span style={{ fontSize:15, fontWeight:700, color:T.fg }}>Your Posts</span>
+            <button onClick={()=>setShowPost(true)} data-cursor-hover
+              style={{ height:38, padding:"0 11px", borderRadius:7, border:`1px solid ${T.border}`, background:T.el, color:T.subtle, fontSize:15, fontWeight:600, cursor:"pointer", fontFamily:"inherit", display:"flex", alignItems:"center", gap:4, transition:"all 0.2s" }}
+              onMouseEnter={e=>{ const el=e.currentTarget; el.style.color=T.fg; el.style.borderColor=T.faint; }}
+              onMouseLeave={e=>{ const el=e.currentTarget; el.style.color=T.subtle; el.style.borderColor=T.border; }}>
+              + New
+            </button>
+          </div>
+
+          {/* Posts list */}
+          <div style={{ flex:"0 0 auto", maxHeight:220, overflowY:"auto", borderBottom:`1px solid ${T.border}` }}>
+            {posts.length>0 ? posts.map(p=>(
+              <div key={p.id} style={{ padding:"11px 20px", borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", gap:10 }}>
+                <div style={{ width:28, height:38, borderRadius:7, background:"rgba(255,255,255,0.05)", border:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+                  <span className="rainbow-text" style={{ fontSize:14 }}>↑</span>
+                </div>
+                <div style={{ flex:1, minWidth:0 }}>
+                  <p style={{ fontSize:14, color:T.fg, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{p.campaign}</p>
+                  <p style={{ fontSize:15, color:T.faint, fontFamily:"var(--font-geist-mono)", marginTop:2 }}>{fmtK(p.impressions)} views</p>
+                </div>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <p className="rainbow-text" style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", fontWeight:700 }}>+{p.dripHr}</p>
+                  <p style={{ fontSize:11, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em", marginTop:1 }}>DRIP/hr</p>
+                </div>
+              </div>
+            )) : (
+              <div style={{ padding:"20px", textAlign:"center" }}>
+                <p style={{ fontSize:14, color:T.faint, lineHeight:1.6 }}>No posts yet.<br/>Join a campaign first.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Live feed header */}
+          <div style={{ height:48, flexShrink:0, borderBottom:`1px solid ${T.border}`, display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 20px" }}>
+            <span style={{ fontSize:14, fontWeight:700, color:T.fg }}>Live Feed</span>
+            <div style={{ display:"flex", alignItems:"center", gap:5 }}>
+              <span style={{ position:"relative", display:"inline-flex", width:5, height:5 }}>
+                <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.6 }}/>
+                <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:5, height:5, borderRadius:"50%" }}/>
+              </span>
+              <span className="rainbow-text" style={{ fontSize:14, fontFamily:"var(--font-geist-mono)", fontWeight:600, letterSpacing:"0.1em" }}>LIVE</span>
+            </div>
+          </div>
+
+          {/* Feed — fills remaining height */}
+          <div style={{ flex:1, overflowY:"auto" }}>
+            <CommunityFeed compact/>
+          </div>
+        </div>
+      </div>
 
       {/* Modals */}
       <AnimatePresence>
@@ -1556,7 +1718,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
   );
 }
 
-// ─── Root ─────────────────────────────────────────────────────────────────────
+// â”€â”€â”€ Root â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function Page() {
   const { publicKey } = useWallet();
   const [screen,        setScreen]        = useState<Screen>("landing");
@@ -1604,3 +1766,7 @@ export default function Page() {
     </TipProvider>
   );
 }
+
+
+
+
