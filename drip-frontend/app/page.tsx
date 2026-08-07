@@ -31,7 +31,7 @@ const T = {
 const ease = [0.22, 1, 0.36, 1] as const;
 const DRIP_PRICE = 1.50;
 const VAULT_W = 300;
-const VAULT_H = 630;
+const VAULT_H = 380;
 const NAV_H   = 60; // matches header height
 
 // â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1600,8 +1600,8 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
             )}
           </div>
 
-          {/* Row 2 — vault animation (fixed height, vault scaled inside) */}
-          <div style={{ flexShrink:0, borderBottom:`1px solid ${T.border}` }}>
+          {/* Row 2 — vault animation (fixed height, clips to prevent overflow) */}
+          <div style={{ flexShrink:0, borderBottom:`1px solid ${T.border}`, height:VAULT_H, overflow:"hidden" }}>
             <Vault fillPct={fillPct} drops={drops} ripples={ripples} onDropEnd={removeDropById} active={active}/>
           </div>
 
