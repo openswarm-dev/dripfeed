@@ -986,7 +986,9 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
   }, [connected, publicKey, xToken, xHandle, onDone]);
 
   function signInWithX() {
-    window.location.href = `${process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000"}/api/auth/x`;
+    const api    = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+    const origin = window.location.origin; // e.g. http://localhost:3000 or https://drip-frontend-...
+    window.location.href = `${api}/api/auth/x?return=${encodeURIComponent(origin)}`;
   }
 
   const xDone = !!xToken && !!xHandle;

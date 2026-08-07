@@ -7,8 +7,17 @@ import { signToken, requireAuth, AuthPayload } from '../middleware/auth';
 
 export const authRouter = Router();
 
+// Allowed frontend origins (prevents open-redirect abuse)
+const ALLOWED_ORIGINS = new Set([
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://localhost:3002',
+  (process.env.FRONTEND_URL ?? '').trim(),
+].filter(Boolean));
+
+interface PendingToken { secret: string; returnUrl: string; }
 // Temporary store for OAuth request tokens (expires quickly, in-memory is fine)
-const pendingTokens = new Map<string, string>(); // oauth_token → oauth_token_secret
+const pendingTokens = new Map<string, PendingToken>(); // oauth_token → { secret, returnUrl }
 
 function makeOAuth() {
   return new OAuth({
@@ -23,7 +32,12 @@ function makeOAuth() {
 }
 
 // ── Step 1: Redirect user to X sign-in ──────────────────────────────────────
-authRouter.get('/x', async (_req: Request, res: Response) => {
+authRouter.get('/x', async (req: Request, res: Response) => {
+  // ?return= lets the local dev frontend say "send me back to localhost"
+  const returnParam = (req.query.return as string ?? '').trim();
+  const defaultFrontend = (process.env.FRONTEND_URL ?? 'http://localhost:3000').trim();
+  const returnUrl = ALLOWED_ORIGINS.has(returnParam) ? returnParam : defaultFrontend;
+
   try {
     const oauth = makeOAuth();
     const callbackUrl = `${(process.env.SERVER_URL ?? '').trim()}/api/auth/x/callback`;
@@ -43,35 +57,34 @@ authRouter.get('/x', async (_req: Request, res: Response) => {
     );
 
     const params = new URLSearchParams(response.data as string);
-    const oauthToken = params.get('oauth_token')!;
+    const oauthToken       = params.get('oauth_token')!;
     const oauthTokenSecret = params.get('oauth_token_secret')!;
 
-    pendingTokens.set(oauthToken, oauthTokenSecret);
+    pendingTokens.set(oauthToken, { secret: oauthTokenSecret, returnUrl });
 
-    // Redirect user to X authorisation page
     res.redirect(`https://api.twitter.com/oauth/authorize?oauth_token=${oauthToken}`);
   } catch (err) {
     console.error('[Auth] Failed to get request token:', err);
-    const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
-    res.redirect(`${frontendUrl}?auth_error=request_token_failed`);
+    res.redirect(`${returnUrl}?auth_error=request_token_failed`);
   }
 });
 
 // ── Step 2: X redirects here after user authorises ──────────────────────────
 authRouter.get('/x/callback', async (req: Request, res: Response) => {
   const { oauth_token, oauth_verifier } = req.query as Record<string, string>;
-  const frontendUrl = process.env.FRONTEND_URL ?? 'http://localhost:3000';
+  const defaultFrontend = (process.env.FRONTEND_URL ?? 'http://localhost:3000').trim();
 
   if (!oauth_token || !oauth_verifier) {
-    res.redirect(`${frontendUrl}?auth_error=denied`);
+    res.redirect(`${defaultFrontend}?auth_error=denied`);
     return;
   }
 
-  const oauthTokenSecret = pendingTokens.get(oauth_token);
-  if (!oauthTokenSecret) {
-    res.redirect(`${frontendUrl}?auth_error=token_expired`);
+  const pending = pendingTokens.get(oauth_token);
+  if (!pending) {
+    res.redirect(`${defaultFrontend}?auth_error=token_expired`);
     return;
   }
+  const { secret: oauthTokenSecret, returnUrl: frontendUrl } = pending;
   pendingTokens.delete(oauth_token);
 
   try {
