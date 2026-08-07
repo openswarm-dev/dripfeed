@@ -26,13 +26,19 @@ function makeOAuth() {
 authRouter.get('/x', async (_req: Request, res: Response) => {
   try {
     const oauth = makeOAuth();
-    const callbackUrl = `${process.env.SERVER_URL}/api/auth/x/callback`;
-    const requestData = { url: 'https://api.twitter.com/oauth/request_token', method: 'POST' };
+    const callbackUrl = `${(process.env.SERVER_URL ?? '').trim()}/api/auth/x/callback`;
+
+    // oauth_callback MUST be in the signature base string (include it in data)
+    const requestData = {
+      url: 'https://api.twitter.com/oauth/request_token',
+      method: 'POST',
+      data: { oauth_callback: callbackUrl },
+    };
     const headers = oauth.toHeader(oauth.authorize(requestData)) as unknown as Record<string, string>;
 
     const response = await axios.post(
       'https://api.twitter.com/oauth/request_token',
-      `oauth_callback=${encodeURIComponent(callbackUrl)}&x_auth_access_type=read`,
+      new URLSearchParams({ oauth_callback: callbackUrl }),
       { headers: { ...headers, 'Content-Type': 'application/x-www-form-urlencoded' } },
     );
 
