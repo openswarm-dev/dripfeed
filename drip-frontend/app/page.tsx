@@ -16,13 +16,13 @@ import type { Campaign as APICampaign, Post as APIPost, Vault as APIVault } from
 // ─── Design tokens ────────────────────────────────────────────────────────────
 const T = {
   bg:      "#050508",
-  surface: "#0A0812",
-  el:      "#110D1E",
-  border:  "rgba(168,85,247,0.18)",
-  fg:      "#F0EEFF",
-  subtle:  "#9888BB",
-  faint:   "#4A3F72",
-  drip:    "#A855F7",
+  surface: "#08080C",
+  el:      "rgba(255,255,255,0.04)",
+  border:  "rgba(255,255,255,0.09)",
+  fg:      "#F4F4F8",
+  subtle:  "#8888A0",
+  faint:   "#44445A",
+  drip:    "#E8E8FF",
 } as const;
 
 const ease = [0.22, 1, 0.36, 1] as const;
@@ -42,10 +42,10 @@ interface Post      { id: string; snippet: string; campaign: string; impressions
 
 // Campaign visual gradients (portrait card "image" area)
 const CGRADIENT: Record<string,string> = {
-  c1: "linear-gradient(145deg, rgba(168,85,247,0.45) 0%, rgba(99,102,241,0.35) 50%, rgba(15,10,30,0.9) 100%)",
-  c2: "linear-gradient(145deg, rgba(96,165,250,0.45) 0%, rgba(129,140,248,0.35) 50%, rgba(10,12,30,0.9) 100%)",
-  c3: "linear-gradient(145deg, rgba(34,211,238,0.4) 0%, rgba(96,165,250,0.35) 50%, rgba(10,15,30,0.9) 100%)",
-  c4: "linear-gradient(145deg, rgba(129,140,248,0.45) 0%, rgba(168,85,247,0.35) 50%, rgba(12,8,28,0.9) 100%)",
+  c1: "linear-gradient(145deg, rgba(255,255,255,0.12) 0%, rgba(200,185,255,0.08) 50%, rgba(5,5,8,0.95) 100%)",
+  c2: "linear-gradient(145deg, rgba(200,220,255,0.12) 0%, rgba(180,200,255,0.08) 50%, rgba(5,5,8,0.95) 100%)",
+  c3: "linear-gradient(145deg, rgba(180,240,255,0.12) 0%, rgba(200,230,255,0.08) 50%, rgba(5,5,8,0.95) 100%)",
+  c4: "linear-gradient(145deg, rgba(220,200,255,0.12) 0%, rgba(200,210,255,0.08) 50%, rgba(5,5,8,0.95) 100%)",
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,14 +184,14 @@ function Select({ options, value, onChange, placeholder="Select..." }: {
                 style={{
                   display:"block", width:"100%",
                   padding:"11px 14px", textAlign:"left",
-                  background: opt.value===value ? "rgba(168,85,247,0.1)" : "transparent",
+                  background: opt.value===value ? "rgba(255,255,255,0.07)" : "transparent",
                   color: opt.value===value ? T.drip : T.fg,
                   fontSize:13, border:"none", cursor:"pointer",
                   borderBottom: i < options.length-1 ? `1px solid ${T.border}` : "none",
                   fontFamily:"inherit", transition:"background 0.12s",
                 }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(168,85,247,0.18)" : "rgba(168,85,247,0.05)"; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(168,85,247,0.1)" : "transparent"; }}>
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.12)" : "rgba(255,255,255,0.04)"; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = opt.value===value ? "rgba(255,255,255,0.07)" : "transparent"; }}>
                 {opt.label}
               </button>
             ))}
@@ -224,8 +224,8 @@ function WaveSurface() {
       </defs>
       {/* Single path: fill gives the wave body, stroke gives the glowing top edge */}
       <motion.path
-        fill="rgba(168,85,247,0.25)"
-        stroke="rgba(192,132,252,0.9)"
+        fill="rgba(255,255,255,0.15)"
+        stroke="rgba(255,255,255,0.85)"
         strokeWidth="1.6"
         filter="url(#waveGlow)"
         animate={{ d: paths }}
@@ -267,8 +267,8 @@ function DropParticle({ drop, fillPct, onEnd }: { drop:Drop; fillPct:number; onE
         fontSize:17,
         fontFamily:"var(--font-geist-mono)",
         fontWeight:800,
-        color:"rgba(216,180,254,0.98)",
-        textShadow:"0 0 10px rgba(168,85,247,0.9), 0 0 22px rgba(96,165,250,0.5)",
+        color:"rgba(255,255,255,0.96)",
+        textShadow:"0 0 10px rgba(255,255,255,0.9), 0 0 24px rgba(220,210,255,0.5)",
         lineHeight:1,
         letterSpacing:"-0.02em",
         userSelect:"none",
@@ -281,8 +281,8 @@ function DropParticle({ drop, fillPct, onEnd }: { drop:Drop; fillPct:number; onE
         width:drop.size,
         height:drop.size * 1.75,
         borderRadius:"50% 50% 50% 50% / 65% 65% 35% 35%",
-        background:"linear-gradient(175deg, rgba(216,180,254,0.95) 0%, rgba(96,165,250,0.85) 100%)",
-        boxShadow:`0 0 ${drop.size + 4}px rgba(168,85,247,0.8), 0 2px ${drop.size * 2 + 2}px rgba(96,165,250,0.4)`,
+        background:"linear-gradient(175deg, rgba(255,255,255,0.95) 0%, rgba(210,200,255,0.8) 100%)",
+        boxShadow:`0 0 ${drop.size + 4}px rgba(255,255,255,0.7), 0 2px ${drop.size * 2 + 2}px rgba(220,210,255,0.3)`,
         flexShrink:0,
       }}/>
     </motion.div>
@@ -304,10 +304,10 @@ function RippleEffect({ ripple, fillPct }: { ripple:Ripple; fillPct:number }) {
           position:"absolute", left:ripple.x, top:y,
           width:8, height:4,
           borderRadius:"50%",
-          border:`${r.stroke}px solid rgba(192,132,252,${r.opacity})`,
+          border:`${r.stroke}px solid rgba(255,255,255,${r.opacity})`,
           marginLeft:-4, marginTop:-2,
           pointerEvents:"none",
-          boxShadow: i===0 ? "0 0 8px 1px rgba(168,85,247,0.4)" : "none",
+          boxShadow: i===0 ? "0 0 8px 1px rgba(255,255,255,0.35)" : "none",
         }}
           initial={{ scaleX:1, scaleY:1, opacity:r.opacity }}
           animate={{ scaleX:r.scaleX, scaleY:r.scaleY, opacity:0 }}
@@ -317,7 +317,7 @@ function RippleEffect({ ripple, fillPct }: { ripple:Ripple; fillPct:number }) {
       <motion.div style={{
         position:"absolute", left:ripple.x, top:y,
         width:10, height:10, borderRadius:"50%",
-        background:"rgba(216,180,254,0.9)",
+        background:"rgba(255,255,255,0.9)",
         marginLeft:-5, marginTop:-5, pointerEvents:"none",
         filter:"blur(2px)",
       }}
@@ -336,33 +336,33 @@ function Vault({ fillPct, drops, ripples, onDropEnd, active }: {
   return (
     <div className="neon-border" style={{
       position:"relative", width:VAULT_W, height:VAULT_H, borderRadius:28,
-      background:"rgba(8,5,18,0.85)",
+      background:"rgba(255,255,255,0.02)",
       overflow:"hidden",
       boxShadow: active
-        ? "0 0 80px -16px rgba(168,85,247,0.5), 0 0 40px -10px rgba(96,165,250,0.3), inset 0 0 60px -20px rgba(168,85,247,0.08)"
-        : "0 0 40px -16px rgba(168,85,247,0.15)",
+        ? "0 0 80px -16px rgba(255,255,255,0.3), 0 0 40px -10px rgba(220,210,255,0.2), inset 0 0 60px -20px rgba(255,255,255,0.04)"
+        : "0 0 40px -16px rgba(255,255,255,0.08)",
       transition:"box-shadow 1.2s ease",
-      backdropFilter:"blur(20px)",
+      backdropFilter:"blur(24px)",
     }}>
-      <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(168,85,247,0.1) 1px,transparent 0)", backgroundSize:"18px 18px" }}/>
+      <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(255,255,255,0.06) 1px,transparent 0)", backgroundSize:"18px 18px" }}/>
       {[20,40,60,80].map(p=>(
         <div key={p} style={{ position:"absolute", right:0, bottom:`${p}%`, display:"flex", alignItems:"center" }}>
-          <span style={{ fontSize:7, color:"rgba(192,132,252,0.3)", fontFamily:"var(--font-geist-mono)", paddingRight:6 }}>{p}</span>
-          <div style={{ width:10, height:1, background:"rgba(168,85,247,0.15)" }}/>
+          <span style={{ fontSize:7, color:"rgba(255,255,255,0.18)", fontFamily:"var(--font-geist-mono)", paddingRight:6 }}>{p}</span>
+          <div style={{ width:10, height:1, background:"rgba(255,255,255,0.1)" }}/>
         </div>
       ))}
       <motion.div style={{ position:"absolute", bottom:0, left:0, right:0, overflow:"visible" }}
         animate={{ height:`${fillPct}%` }} transition={{ duration:2.6, ease:[0.22,1,0.36,1] }}>
         <WaveSurface/>
         {/* Liquid body */}
-        <div style={{ position:"absolute", top:8, bottom:0, left:0, right:0, background:"linear-gradient(to top,rgba(168,85,247,0.18) 0%,rgba(96,165,250,0.06) 100%)" }}/>
+        <div style={{ position:"absolute", top:8, bottom:0, left:0, right:0, background:"linear-gradient(to top,rgba(255,255,255,0.1) 0%,rgba(255,255,255,0.03) 100%)" }}/>
         {/* Subsurface glow just below the wave */}
-        <div style={{ position:"absolute", top:8, height:32, left:0, right:0, background:"linear-gradient(to bottom,rgba(192,132,252,0.2) 0%,transparent 100%)" }}/>
+        <div style={{ position:"absolute", top:8, height:32, left:0, right:0, background:"linear-gradient(to bottom,rgba(255,255,255,0.12) 0%,transparent 100%)" }}/>
       </motion.div>
       {drops.map(d=><DropParticle key={d.id} drop={d} fillPct={fillPct} onEnd={()=>onDropEnd(d.id)}/>)}
       {ripples.map(r=><RippleEffect key={r.id} ripple={r} fillPct={fillPct}/>)}
-      {/* Glass sheen overlay */}
-      <div style={{ position:"absolute", inset:0, borderRadius:28, background:"linear-gradient(135deg,rgba(255,255,255,0.06) 0%,rgba(255,255,255,0) 40%,rgba(96,165,250,0.03) 100%)", pointerEvents:"none" }}/>
+      {/* Glass sheen */}
+      <div style={{ position:"absolute", inset:0, borderRadius:28, background:"linear-gradient(135deg,rgba(255,255,255,0.07) 0%,rgba(255,255,255,0) 45%,rgba(220,210,255,0.03) 100%)", pointerEvents:"none" }}/>
     </div>
   );
 }
@@ -450,9 +450,9 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
       style={{
         borderRadius:20, overflow:"hidden",
         background:T.surface,
-        border:`1px solid ${joined?"rgba(168,85,247,0.4)":T.border}`,
+        border:`1px solid ${joined?"rgba(255,255,255,0.22)":T.border}`,
         boxShadow: joined
-          ? "0 8px 40px -12px rgba(168,85,247,0.3), 0 0 0 1px rgba(96,165,250,0.1)"
+          ? "0 8px 40px -12px rgba(255,255,255,0.15), 0 0 0 1px rgba(255,255,255,0.06)"
           : "0 4px 24px -8px rgba(0,0,0,0.6)",
         transition:"border-color 0.4s, box-shadow 0.4s",
         display:"flex", flexDirection:"column",
@@ -471,8 +471,8 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
           <span style={{
             fontSize:9, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em",
             padding:"3px 9px", borderRadius:5,
-            background: joined?"rgba(168,85,247,0.22)":"rgba(0,0,0,0.28)",
-            border:`1px solid ${joined?"rgba(168,85,247,0.5)":"rgba(255,255,255,0.15)"}`,
+            background: joined?"rgba(255,255,255,0.14)":"rgba(0,0,0,0.28)",
+            border:`1px solid ${joined?"rgba(255,255,255,0.35)":"rgba(255,255,255,0.15)"}`,
             color: joined?T.drip:"rgba(255,255,255,0.6)",
             transition:"all 0.4s",
           }}>
@@ -498,7 +498,7 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
             { lbl:"Rate",         val:`${c.dripHr}/hr`, tip:`You earn ${c.dripHr} DRIP per hour from posts in this campaign`, hi:joined },
           ].map(s=>(
             <div key={s.lbl}
-              style={{ padding:"8px 10px", background:T.el, borderRadius:10, border:`1px solid ${s.hi?"rgba(168,85,247,0.25)":T.border}`, cursor:"help" }}
+              style={{ padding:"8px 10px", background:T.el, borderRadius:10, border:`1px solid ${s.hi?"rgba(255,255,255,0.2)":T.border}`, cursor:"help" }}
               onMouseEnter={e=>showTip(e,s.tip)} onMouseLeave={hideTip}>
               <p style={{ fontSize:9, color:T.faint, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.1em", marginBottom:3 }}>{s.lbl}</p>
               <p style={{ fontSize:13, fontWeight:700, color:s.hi?T.drip:T.fg, fontFamily:"var(--font-geist-mono)" }}>{s.val}</p>
@@ -526,7 +526,7 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
 
         {/* Earning badge */}
         {joined&&earning&&(
-          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, paddingBottom:10, borderBottom:`1px solid rgba(168,85,247,0.12)` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:10, paddingBottom:10, borderBottom:`1px solid rgba(255,255,255,0.08)` }}>
             <span style={{ position:"relative", display:"inline-flex", width:6, height:6 }}>
               <span className="rainbow-bg animate-ping" style={{ position:"absolute", inset:0, borderRadius:"50%", opacity:0.5 }}/>
               <span className="rainbow-bg" style={{ position:"relative", display:"inline-flex", width:6, height:6, borderRadius:"50%" }}/>
@@ -539,8 +539,8 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
         <button onClick={onToggle} data-cursor-hover
           style={{
             width:"100%", height:42, borderRadius:11,
-            background: joined?"rgba(168,85,247,0.1)":T.el,
-            border:`1px solid ${joined?"rgba(168,85,247,0.35)":T.border}`,
+            background: joined?"rgba(255,255,255,0.08)":T.el,
+            border:`1px solid ${joined?"rgba(255,255,255,0.22)":T.border}`,
             color: joined?T.drip:T.fg,
             fontWeight:700, fontSize:13, cursor:"pointer",
             display:"flex", alignItems:"center", justifyContent:"center", gap:6,
@@ -556,8 +556,8 @@ function CampaignCard({ c, joined, onToggle, earning, index }: {
 // ─── Post card ────────────────────────────────────────────────────────────────
 function PostCard({ post }: { post:Post }) {
   return (
-    <div style={{ background:T.el, border:`1px solid rgba(168,85,247,0.2)`, borderRadius:14, padding:"14px 18px", display:"flex", alignItems:"center", gap:14 }}>
-      <div style={{ width:38, height:38, borderRadius:10, background:"rgba(168,85,247,0.1)", border:"1px solid rgba(168,85,247,0.2)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
+    <div style={{ background:T.el, border:`1px solid rgba(255,255,255,0.1)`, borderRadius:14, padding:"14px 18px", display:"flex", alignItems:"center", gap:14 }}>
+      <div style={{ width:38, height:38, borderRadius:10, background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 }}>
         <span className="rainbow-text" style={{ fontSize:16, lineHeight:1 }}>↑</span>
       </div>
       <div style={{ flex:1, minWidth:0 }}>
@@ -706,7 +706,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose,
                 <label style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em", color:T.faint, display:"block", marginBottom:7 }}>Tweet URL</label>
                 <input value={url} onChange={e=>{setUrl(e.target.value);if(state==="error")setState("idle");}} placeholder="https://x.com/handle/status/..."
                   style={{ width:"100%", height:44, background:T.el, border:`1px solid ${state==="error"?"rgba(255,80,80,0.35)":T.border}`, borderRadius:11, padding:"0 14px", fontSize:13, color:T.fg, outline:"none", transition:"border-color 0.2s", fontFamily:"inherit" }}
-                  onFocus={e=>(e.target.style.borderColor="rgba(168,85,247,0.5)")}
+                  onFocus={e=>(e.target.style.borderColor="rgba(255,255,255,0.35)")}
                   onBlur={e=>(e.target.style.borderColor=state==="error"?"rgba(255,80,80,0.35)":T.border)}/>
               </div>
               <div style={{ marginBottom:22 }}>
@@ -715,7 +715,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose,
               </div>
               <button onClick={submit} disabled={!url.trim()||state==="verifying"} data-cursor-hover
                 className={url.trim()&&state!=="verifying"?"rainbow-bg":""}
-                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
+                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
                 {state==="verifying"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Verifying on X…</>):state==="error"?"Try Again":"Verify & Submit"}
               </button>
             </>
@@ -776,7 +776,7 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
               </div>
               <button onClick={sign} disabled={state!=="idle"} data-cursor-hover
                 className={state==="idle"?"rainbow-bg":""}
-                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:15, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(168,85,247,0.4)":"none", fontFamily:"inherit" }}>
+                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
                 {state==="idle"&&"Sign & Claim"}
                 {state==="signing"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Signing...</>}
                 {state==="submitting"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Submitting to Solana...</>}
@@ -874,7 +874,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
                   initial={{ opacity:0, scale:0.88 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.88 }}
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   className="rainbow-bg"
-                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(168,85,247,0.5)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
+                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
                   Claim {fmt(claimable,0)} DRIP
                 </motion.button>
               )}
@@ -929,9 +929,9 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
   return (
     <motion.div initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
       style={{ position:"fixed", inset:0, display:"flex", alignItems:"center", justifyContent:"center", background:T.bg }}>
-      <div style={{ position:"absolute", left:"-20%", top:"8%", width:640, height:640, borderRadius:"50%", background:"rgba(168,85,247,0.12)", filter:"blur(160px)", animation:"drift 22s ease-in-out infinite", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", right:"-15%", top:"12%", width:560, height:560, borderRadius:"50%", background:"rgba(96,165,250,0.1)", filter:"blur(150px)", animation:"drift 26s ease-in-out infinite", animationDelay:"-9s", pointerEvents:"none" }}/>
-      <div style={{ position:"absolute", bottom:"-10%", left:"30%", width:500, height:500, borderRadius:"50%", background:"rgba(34,211,238,0.08)", filter:"blur(130px)", animation:"drift 30s ease-in-out infinite", pointerEvents:"none" }}/>
+      <div style={{ position:"absolute", left:"-20%", top:"8%", width:640, height:640, borderRadius:"50%", background:"rgba(255,255,255,0.04)", filter:"blur(160px)", animation:"drift 22s ease-in-out infinite", pointerEvents:"none" }}/>
+      <div style={{ position:"absolute", right:"-15%", top:"12%", width:560, height:560, borderRadius:"50%", background:"rgba(220,210,255,0.05)", filter:"blur(150px)", animation:"drift 26s ease-in-out infinite", animationDelay:"-9s", pointerEvents:"none" }}/>
+      <div style={{ position:"absolute", bottom:"-10%", left:"30%", width:500, height:500, borderRadius:"50%", background:"rgba(200,220,255,0.04)", filter:"blur(130px)", animation:"drift 30s ease-in-out infinite", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", inset:0, backgroundImage:"radial-gradient(circle at 1px 1px,rgba(255,255,255,0.07) 1px,transparent 0)", backgroundSize:"24px 24px", pointerEvents:"none" }}/>
 
       <div style={{ position:"relative", width:"100%", maxWidth:440, padding:"0 24px", textAlign:"center" }}>
@@ -955,30 +955,30 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
           <div style={{ padding:22, display:"flex", flexDirection:"column", gap:8 }}>
 
             {/* Step 1: Sign in with X */}
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", background:T.el, borderRadius:12, border:`1px solid ${xDone?"rgba(168,85,247,0.4)":T.border}`, transition:"border-color 0.4s" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", background:T.el, borderRadius:12, border:`1px solid ${xDone?"rgba(255,255,255,0.25)":T.border}`, transition:"border-color 0.4s" }}>
               <div style={{ display:"flex", alignItems:"center", gap:11 }}>
-                <svg width="15" height="15" viewBox="0 0 24 24" fill={xDone?"#A855F7":T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill={xDone?T.fg:T.subtle}><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.746l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
                 <span style={{ fontSize:14, fontWeight:600, color:xDone?T.fg:T.subtle }}>Sign in with X</span>
               </div>
               {xDone
                 ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{xHandle}</span>
                 : <button data-cursor-hover onClick={signInWithX} className="rainbow-bg"
-                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                     Connect
                   </button>
               }
             </div>
 
             {/* Step 2: Phantom wallet */}
-            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", background:T.el, borderRadius:12, border:`1px solid ${wDone?"rgba(168,85,247,0.4)":T.border}`, opacity:xDone?1:0.4, transition:"opacity 0.4s, border-color 0.4s", pointerEvents:xDone?"auto":"none" }}>
+            <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", background:T.el, borderRadius:12, border:`1px solid ${wDone?"rgba(255,255,255,0.25)":T.border}`, opacity:xDone?1:0.4, transition:"opacity 0.4s, border-color 0.4s", pointerEvents:xDone?"auto":"none" }}>
               <div style={{ display:"flex", alignItems:"center", gap:11 }}>
-                <div style={{ width:15, height:15, borderRadius:4, background:wDone?"#A855F7":T.faint, transition:"background 0.4s" }}/>
+                <div style={{ width:15, height:15, borderRadius:4, background:wDone?"rgba(255,255,255,0.85)":T.faint, transition:"background 0.4s" }}/>
                 <span style={{ fontSize:14, fontWeight:600, color:wDone?T.fg:T.subtle }}>Connect Phantom Wallet</span>
               </div>
               {!xDone && <span style={{ fontSize:11, color:T.faint }}>Sign in with X first</span>}
               {xDone && !wDone && (
                 <button data-cursor-hover onClick={() => setVisible(true)} className="rainbow-bg"
-                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                   Connect
                 </button>
               )}
@@ -1216,7 +1216,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
               whileTap={claimable>0.1?{ scale:0.97 }:{}}
               data-cursor-hover
               className={claimable>0.1?"rainbow-bg":""}
-              style={{ height:52, padding:"0 28px", borderRadius:13, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:"#fff", fontWeight:700, fontSize:15, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 60px -12px rgba(168,85,247,0.4)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
+              style={{ height:52, padding:"0 28px", borderRadius:13, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 60px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
               {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
             </motion.button>
             <motion.button
@@ -1246,7 +1246,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
           <Reveal>
             <div style={{ marginBottom:52 }}>
               <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>01 — Campaigns</p>
-              <h2 style={{ fontSize:"clamp(2.4rem,5vw,4rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
+              <h2 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
                 Join a<br/><span className="rainbow-text">Campaign</span>
               </h2>
             </div>
@@ -1267,7 +1267,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
           <Reveal>
             <div style={{ marginBottom:40 }}>
               <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>02 — Your posts</p>
-              <h2 style={{ fontSize:"clamp(2.4rem,5vw,4rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
+              <h2 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
                 Your<br/><span className="rainbow-text">Earnings</span>
               </h2>
             </div>
@@ -1294,7 +1294,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
             <div style={{ display:"flex", alignItems:"flex-end", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:12 }}>
               <div>
                 <p style={{ fontSize:10, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.18em", color:T.faint, marginBottom:14 }}>03 — Community</p>
-                <h3 style={{ fontSize:"clamp(2rem,4vw,3.2rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
+                <h3 style={{ fontSize:"clamp(2rem,4vw,3rem)", fontWeight:800, textTransform:"uppercase", letterSpacing:"-0.04em", lineHeight:0.92, margin:0 }}>
                   Live <span className="rainbow-text">Feed</span>
                 </h3>
               </div>

@@ -14,7 +14,9 @@ html {
 
 body {
   background: #050508;
-  color: #F0EEFF;
+  color: #F4F4F8;
+  font-size: 14px;
+  line-height: 1.5;
   font-family: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -22,13 +24,19 @@ body {
 }
 
 /* Scrollbar */
-::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: #050508; }
-::-webkit-scrollbar-thumb { background: rgba(168,85,247,0.3); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(168,85,247,0.5); }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
 
 /* Selection */
-::selection { background: #A855F7; color: #fff; }
+::selection { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* ── Consistent type scale ── */
+.t-label  { font-size: 10px; font-family: var(--font-geist-mono); text-transform: uppercase; letter-spacing: 0.16em; }
+.t-body   { font-size: 14px; line-height: 1.55; }
+.t-mono   { font-size: 12px; font-family: var(--font-geist-mono); }
+.t-metric { font-size: 20px; font-weight: 700; font-family: var(--font-geist-mono); letter-spacing: -0.02em; }
 
 /* ── Ping (live indicators) ── */
 @keyframes ping {
@@ -47,7 +55,7 @@ body {
 .animate-drift-slow  { animation: drift 30s ease-in-out infinite; }
 .animate-drift-delay { animation: drift 26s ease-in-out infinite; animation-delay: -9s; }
 
-/* ── Dark texture utilities ── */
+/* ── Textures ── */
 .noise-overlay-dark {
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.055 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
   pointer-events: none;
@@ -55,50 +63,61 @@ body {
 }
 
 .grid-dots-dark {
-  background-image: radial-gradient(circle at 1px 1px, rgba(168,85,247,0.12) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.06) 1px, transparent 0);
   background-size: 24px 24px;
 }
 
-/* ── Holographic iridescent gradient ── */
+/* ── White/silver iridescent gradient (the holographic edge effect) ── */
 @keyframes holo-flow {
   0%   { background-position: 0%   50%; }
   50%  { background-position: 100% 50%; }
   100% { background-position: 0%   50%; }
 }
 
-/* ── Neon border pulse ── */
+/* Subtle neon edge pulse */
 @keyframes neon-pulse {
-  0%, 100% { opacity: 0.7; }
+  0%, 100% { opacity: 0.6; }
   50%       { opacity: 1;   }
 }
 
+/*
+  Iridescent = mostly white/silver, with gentle purple → blue → cyan colour shift.
+  Matches the ticket image: edges are bright white with iridescent colour hints.
+*/
 .rainbow-text {
-  background: linear-gradient(90deg, #A855F7, #818CF8, #60A5FA, #22D3EE, #818CF8, #A855F7);
+  background: linear-gradient(90deg,
+    #ffffff, #e8d8ff, #c8d8ff, #c8f0ff, #e0d8ff, #ffffff
+  );
   background-size: 300% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: holo-flow 5s linear infinite;
+  animation: holo-flow 6s linear infinite;
 }
 
 .rainbow-bg {
-  background: linear-gradient(90deg, #A855F7, #818CF8, #60A5FA, #22D3EE, #818CF8, #A855F7);
+  background: linear-gradient(90deg,
+    #ffffff, #e8d8ff, #c8d8ff, #c8f0ff, #e0d8ff, #ffffff
+  );
   background-size: 300% 100%;
-  animation: holo-flow 5s linear infinite;
+  animation: holo-flow 6s linear infinite;
 }
 
-/* ── Glass card ── */
-.glass-card {
-  background: linear-gradient(135deg, rgba(168,85,247,0.06) 0%, rgba(96,165,250,0.03) 100%);
-  backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(168,85,247,0.2);
+/* ── Glassmorphism panel ── */
+.glass-panel {
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.07) 0%,
+    rgba(255,255,255,0.03) 100%
+  );
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255,255,255,0.1);
   box-shadow:
-    0 0 0 1px rgba(96,165,250,0.08),
-    inset 0 1px 0 rgba(255,255,255,0.08),
-    0 24px 64px rgba(0,0,0,0.6);
+    inset 0 1px 0 rgba(255,255,255,0.12),
+    0 24px 64px rgba(0,0,0,0.55);
 }
 
-/* ── Neon border wrapper (gradient border trick) ── */
+/* ── Iridescent neon border (animated gradient ring, mostly white/silver) ── */
 .neon-border {
   position: relative;
 }
@@ -108,12 +127,18 @@ body {
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, #A855F7, #60A5FA, #22D3EE, #A855F7);
+  background: linear-gradient(135deg,
+    rgba(255,255,255,0.9),
+    rgba(210,190,255,0.6),
+    rgba(180,210,255,0.6),
+    rgba(180,240,255,0.6),
+    rgba(255,255,255,0.9)
+  );
   background-size: 300% 100%;
   -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
-  animation: holo-flow 4s linear infinite, neon-pulse 3s ease-in-out infinite;
+  animation: holo-flow 5s linear infinite, neon-pulse 3s ease-in-out infinite;
   pointer-events: none;
 }
 
@@ -139,14 +164,12 @@ body {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
 }
-.stat-border { border-right: 1px solid rgba(168,85,247,0.12); }
+.stat-border { border-right: 1px solid rgba(255,255,255,0.07); }
 @media (max-width: 768px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .stat-border { border-right: none; }
-  .stats-grid > *:nth-child(-n+2) { border-bottom: 1px solid rgba(168,85,247,0.12); }
-  .stats-grid > *:nth-child(odd)  { border-right: 1px solid rgba(168,85,247,0.12); }
+  .stats-grid > *:nth-child(-n+2) { border-bottom: 1px solid rgba(255,255,255,0.07); }
+  .stats-grid > *:nth-child(odd)  { border-right:  1px solid rgba(255,255,255,0.07); }
 }
 
 /* ── Campaign grid ── */
@@ -162,5 +185,5 @@ body {
 @media (max-width: 860px) { .nav-account { display: none !important; } }
 @media (max-width: 640px) { .nav-links   { display: none !important; } }
 
-/* ── Scroll snap for anchor links ── */
+/* ── Scroll anchor offset ── */
 html { scroll-padding-top: 70px; }
