@@ -781,7 +781,7 @@ function SubmitModal({ joined, campaigns, walletAddress, twitterHandle, onClose,
               </div>
               <button onClick={submit} disabled={!url.trim()||state==="verifying"} data-cursor-hover
                 className={url.trim()&&state!=="verifying"?"rainbow-bg":""}
-                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
+                style={{ width:"100%", height:48, borderRadius:12, border:"none", background:(!url.trim()||state==="verifying")?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:url.trim()&&state!=="verifying"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, fontFamily:"inherit" }}>
                 {state==="verifying"?(<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Verifying on X…</>):state==="error"?"Try Again":"Verify & Submit"}
               </button>
             </>
@@ -842,7 +842,7 @@ function ClaimModal({ claimable, onClose, onConfirm }: { claimable:number; onClo
               </div>
               <button onClick={sign} disabled={state!=="idle"} data-cursor-hover
                 className={state==="idle"?"rainbow-bg":""}
-                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
+                style={{ width:"100%", height:50, borderRadius:13, border:"none", background:state!=="idle"?"rgba(255,255,255,0.05)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:state==="idle"?"pointer":"not-allowed", display:"flex", alignItems:"center", justifyContent:"center", gap:8, boxShadow:state==="idle"?"0 0 50px -10px rgba(255,255,255,0.2)":"none", fontFamily:"inherit" }}>
                 {state==="idle"&&"Sign & Claim"}
                 {state==="signing"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Signing...</>}
                 {state==="submitting"&&<><motion.span animate={{ rotate:360 }} transition={{ duration:1, repeat:Infinity, ease:"linear" }} style={{ display:"inline-block" }}>⟳</motion.span>Submitting to Solana...</>}
@@ -940,7 +940,7 @@ function Nav({ claimable, fillPct, onClaim, onSubmit, onLogout, walletAddress, t
                   initial={{ opacity:0, scale:0.88 }} animate={{ opacity:1, scale:1 }} exit={{ opacity:0, scale:0.88 }}
                   whileHover={{ scale:1.03 }} whileTap={{ scale:0.97 }}
                   className="rainbow-bg"
-                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
+                  style={{ height:34, padding:"0 14px", borderRadius:8, border:"none", color:"#fff", fontWeight:700, fontSize:12, cursor:"pointer", boxShadow:"0 0 30px -6px rgba(255,255,255,0.3)", display:"flex", alignItems:"center", gap:5, fontFamily:"inherit" }}>
                   Claim {fmt(claimable,0)} DRIP
                 </motion.button>
               )}
@@ -1028,7 +1028,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
               {xDone
                 ? <span className="rainbow-text" style={{ fontSize:12, fontWeight:700 }}>✓ @{xHandle}</span>
                 : <button data-cursor-hover onClick={signInWithX} className="rainbow-bg"
-                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                    style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                     Connect
                   </button>
               }
@@ -1043,7 +1043,7 @@ function Landing({ onDone }: { onDone: (handle: string, token: string) => void }
               {!xDone && <span style={{ fontSize:11, color:T.faint }}>Sign in with X first</span>}
               {xDone && !wDone && (
                 <button data-cursor-hover onClick={() => setVisible(true)} className="rainbow-bg"
-                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#0A0A0C", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
+                  style={{ height:30, padding:"0 14px", borderRadius:7, border:"none", color:"#fff", fontWeight:700, fontSize:11, cursor:"pointer", fontFamily:"inherit" }}>
                   Connect
                 </button>
               )}
@@ -1284,7 +1284,7 @@ function DripApp({ walletAddress, twitterHandle, authToken, onLogout }: { wallet
               whileTap={claimable>0.1?{ scale:0.97 }:{}}
               data-cursor-hover
               className={claimable>0.1?"rainbow-bg":""}
-              style={{ height:52, padding:"0 28px", borderRadius:13, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:"#0A0A0C", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 60px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
+              style={{ height:52, padding:"0 28px", borderRadius:13, border:"none", background:claimable<=0.1?"rgba(255,255,255,0.06)":undefined, color:"#fff", fontWeight:700, fontSize:14, cursor:claimable>0.1?"pointer":"not-allowed", boxShadow:claimable>0.1?"0 0 60px -12px rgba(255,255,255,0.3)":"none", transition:"box-shadow 0.4s", fontFamily:"inherit" }}>
               {claimable>0.1?`Claim ${fmt(claimable)} DRIP`:"Nothing to claim yet"}
             </motion.button>
             <motion.button
