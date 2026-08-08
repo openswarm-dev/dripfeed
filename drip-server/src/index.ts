@@ -23,6 +23,10 @@ import { prisma }          from './lib/prisma';
 const app  = express();
 const PORT = process.env.PORT || 4000;
 
+// Railway (and most PaaS) sits behind a reverse proxy that sets X-Forwarded-For.
+// Without this, express-rate-limit throws ERR_ERL_UNEXPECTED_X_FORWARDED_FOR and
+// crashes every request before CORS headers are written.
+app.set('trust proxy', 1);
 app.use(helmet());
 // Reflect every origin back — safe because all sensitive routes require JWT auth.
 // CORS is not a meaningful security boundary for token-authenticated APIs.
