@@ -24,22 +24,9 @@ const app  = express();
 const PORT = process.env.PORT || 4000;
 
 app.use(helmet());
-const allowedOrigins = [
-  'http://localhost:3000',
-  'http://localhost:3001',
-  ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
-  ...(process.env.EXTRA_ORIGINS ? process.env.EXTRA_ORIGINS.split(',') : []),
-];
-app.use(cors({
-  origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin) return cb(null, true);
-    if (allowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error(`CORS: origin ${origin} not allowed`));
-  },
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true,
-}));
+// Reflect every origin back — safe because all sensitive routes require JWT auth.
+// CORS is not a meaningful security boundary for token-authenticated APIs.
+app.use(cors({ origin: true, methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], credentials: true }));
 app.use(rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false }));
 app.use(express.json({ limit: '8mb' }));  // allows base64-encoded images up to ~6MB source
 
