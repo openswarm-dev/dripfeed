@@ -12,7 +12,9 @@ const ALLOWED_ORIGINS = new Set([
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3002',
+  'http://localhost:3006',
   (process.env.FRONTEND_URL ?? '').trim(),
+  ...(process.env.EXTRA_ORIGINS ? process.env.EXTRA_ORIGINS.split(',').map(s => s.trim()) : []),
 ].filter(Boolean));
 
 interface PendingToken { secret: string; returnUrl: string; }
