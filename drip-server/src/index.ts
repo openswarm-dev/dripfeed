@@ -35,7 +35,16 @@ app.use(rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHea
 app.use(express.json({ limit: '8mb' }));  // allows base64-encoded images up to ~6MB source
 
 app.get('/health', (_req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString(), uptime: process.uptime() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    auth: {
+      xKeys: !!(process.env.X_CONSUMER_KEY && process.env.X_CONSUMER_SECRET),
+      jwt: !!process.env.JWT_SECRET,
+      serverUrl: process.env.SERVER_URL?.trim() || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : 'auto'),
+    },
+  });
 });
 
 app.use('/api/auth',      authRouter);

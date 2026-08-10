@@ -7,6 +7,21 @@ import { signToken, requireAuth, AuthPayload } from '../middleware/auth';
 
 export const authRouter = Router();
 
+function serverBaseUrl(req: Request): string {
+  const configured = (process.env.SERVER_URL ?? '').trim();
+  if (configured) return configured.replace(/\/$/, '');
+  const railway = (process.env.RAILWAY_PUBLIC_DOMAIN ?? '').trim();
+  if (railway) return `https://${railway}`;
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+function authErrorCode(err: unknown): string {
+  if (!process.env.X_CONSUMER_KEY || !process.env.X_CONSUMER_SECRET) return 'missing_x_keys';
+  const body = axios.isAxiosError(err) ? String(err.response?.data ?? '') : '';
+  if (/callback/i.test(body)) return 'callback_url_mismatch';
+  return 'request_token_failed';
+}
+
 // Allowed frontend origins (prevents open-redirect abuse)
 const ALLOWED_ORIGINS = new Set([
   'http://localhost:3000',
@@ -42,7 +57,7 @@ authRouter.get('/x', async (req: Request, res: Response) => {
 
   try {
     const oauth = makeOAuth();
-    const callbackUrl = `${(process.env.SERVER_URL ?? '').trim()}/api/auth/x/callback`;
+    const callbackUrl = `${serverBaseUrl(req)}/api/auth/x/callback`;
 
     // oauth_callback MUST be in the signature base string (include it in data)
     const requestData = {
@@ -66,8 +81,8 @@ authRouter.get('/x', async (req: Request, res: Response) => {
 
     res.redirect(`https://api.twitter.com/oauth/authorize?oauth_token=${oauthToken}`);
   } catch (err) {
-    console.error('[Auth] Failed to get request token:', err);
-    res.redirect(`${returnUrl}?auth_error=request_token_failed`);
+    console.error('[Auth] Failed to get request token:', axios.isAxiosError(err) ? err.response?.data : err);
+    res.redirect(`${returnUrl}?auth_error=${authErrorCode(err)}`);
   }
 });
 
@@ -144,8 +159,9 @@ authRouter.get('/x/callback', async (req: Request, res: Response) => {
     // Redirect back to frontend with token in URL
     res.redirect(`${frontendUrl}?token=${jwt}&handle=${twitterHandle}`);
   } catch (err) {
-    console.error('[Auth] Callback error:', err);
-    res.redirect(`${frontendUrl}?auth_error=callback_failed`);
+    console.error('[Auth] Callback error:', axios.isAxiosError(err) ? err.response?.data : err);
+    const code = !process.env.JWT_SECRET ? 'missing_jwt_secret' : 'callback_failed';
+    res.redirect(`${frontendUrl}?auth_error=${code}`);
   }
 });
 
