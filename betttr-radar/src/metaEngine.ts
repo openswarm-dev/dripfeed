@@ -94,6 +94,8 @@ export interface MetaDashboard {
   dominantStage: MetaStage;
   insight: string;
   stages: Array<{ id: MetaStage; label: string; description: string }>;
+  /** Total tokens currently sitting in each stage across tracked clusters */
+  stageTokenCounts: Record<MetaStage, number>;
   forming: MetaTrack[];
   emerging: MetaTrack[];
   active: MetaTrack[];
@@ -108,34 +110,36 @@ const STOP = new Set([
 ]);
 
 /** Minimum tokens to count as a real meta (not noise) */
-const MIN_META_TOKENS = 5;
+const MIN_META_TOKENS = 8;
 /** Minimum for "forming" — early but measurable cluster */
-const MIN_FORMING_TOKENS = 4;
+const MIN_FORMING_TOKENS = 5;
 /** Min launches in last hour to call something actively forming */
 const MIN_FORMING_VELOCITY = 3;
 /** Min distinct deployer wallets for a meta */
 const MIN_UNIQUE_CREATORS = 3;
 /** Min tokens sharing the same image to form a visual copycat meta (title ignored) */
-const MIN_IMAGE_CLUSTER = 2;
+const MIN_IMAGE_CLUSTER = 5;
 
-/** Live-mode thresholds — tighter window, faster stage movement */
+/** Live-mode thresholds — real metas need size; confirmed ones stick around */
 const LIVE = {
-  lookbackHours: 24,
-  minEmergingTokens: 2,
-  emergingWindowSec: 45 * 60,
-  minFormingTokens: 3,
+  lookbackHours: 36,
+  minEmergingTokens: 3,
+  emergingWindowSec: 60 * 60,
+  minFormingTokens: 5,
   minFormingVelocity: 2,
-  minMetaTokens: 4,
-  minUniqueCreators: 2,
-  fadeAfterHours: 2,
+  minMetaTokens: 8,
+  minUniqueCreators: 3,
+  minImageCluster: 6,
+  fadeAfterHours: 10,
+  activeAfterHours: 18,
 };
 
 export const STAGE_DEFS: Array<{ id: MetaStage; label: string; description: string }> = [
-  { id: 'spark', label: 'Spark', description: 'Something is happening — first signal' },
-  { id: 'naming', label: 'Naming', description: 'First token names the theme' },
-  { id: 'recognition', label: 'Recognition', description: 'Others see it — 2–3 related launches' },
-  { id: 'copycat', label: 'Copycat wave', description: 'X worked — launch X2, X3…' },
-  { id: 'momentum', label: 'Money follows', description: 'Buys and mcap confirm the crowd' },
+  { id: 'spark', label: 'Spark', description: 'First signal — early theme noise' },
+  { id: 'naming', label: 'Naming', description: 'Theme gets a name — 2 related launches' },
+  { id: 'recognition', label: 'Recognition', description: 'Crowd notices — 3–7 related launches' },
+  { id: 'copycat', label: 'Copycat wave', description: 'Wave of clones — 8+ related launches' },
+  { id: 'momentum', label: 'Money follows', description: 'Volume and mcap confirm the crowd' },
   { id: 'peak', label: 'Peak', description: 'Max attention — velocity slowing' },
   { id: 'fade', label: 'Fade', description: 'Meta cooling — attention moving on' },
 ];
@@ -364,10 +368,14 @@ function qualifiesAsMeta(
   live = false,
 ): boolean {
   const minTokens = live ? LIVE.minMetaTokens : MIN_META_TOKENS;
-  if (imageCluster && count >= MIN_IMAGE_CLUSTER) return true;
-  if (count >= minTokens && creators >= 2) return true;
-  if (count >= minTokens && velocityPerHour >= (live ? 1.5 : 2)) return true;
-  if (count >= (live ? 5 : 6) && creators >= MIN_UNIQUE_CREATORS) return true;
+  const minCreators = live ? LIVE.minUniqueCreators : MIN_UNIQUE_CREATORS;
+  const minImage = live ? LIVE.minImageCluster : MIN_IMAGE_CLUSTER;
+
+  // Image clones alone are not a meta until they hit real size + deployers.
+  if (imageCluster && count >= minImage && creators >= Math.min(2, minCreators)) return true;
+  if (count >= minTokens && creators >= minCreators) return true;
+  if (count >= minTokens && velocityPerHour >= (live ? 2 : 2.5) && creators >= 2) return true;
+  if (count >= minTokens + 4 && creators >= 2) return true;
   return false;
 }
 
@@ -468,7 +476,8 @@ function buildTrackFromGroup(
   live = false,
 ): MetaTrack | null {
   if (imageCluster) {
-    if (deduped.length < MIN_IMAGE_CLUSTER) return null;
+    // Allow early image clusters into forming/emerging; confirmed meta still needs LIVE.minImageCluster.
+    if (deduped.length < (live ? LIVE.minEmergingTokens : MIN_IMAGE_CLUSTER)) return null;
   } else {
     const minTokens = live ? LIVE.minEmergingTokens : MIN_FORMING_TOKENS;
     if (deduped.length < minTokens) return null;
@@ -555,8 +564,15 @@ function buildTrackFromGroup(
   ].slice(0, 8);
 
   const hoursSinceLast = (now - lastSeen) / 3600;
-  const isNew = (isForming || isEmerging) && ageHours <= 4 && stage !== 'fade';
-  const isActive = isMeta && (hoursSinceLast <= (live ? 6 : 12) || effectiveVelocity >= (live ? 3 : 4));
+  const isNew = (isForming || isEmerging) && ageHours <= 6 && stage !== 'fade';
+  const activeWindow = live ? LIVE.activeAfterHours : 24;
+  const isActive = isMeta && (
+    hoursSinceLast <= activeWindow ||
+    effectiveVelocity >= (live ? 2 : 3) ||
+    stage === 'copycat' ||
+    stage === 'momentum' ||
+    stage === 'peak'
+  );
   const attentionScore = scoreMeta({
     launchCount: deduped.length,
     velocityPer10Min,
@@ -632,18 +648,25 @@ function inferStage(
   const hoursSinceLast = (opts.now - opts.lastSeen) / 3600;
   const hoursSinceFirst = (opts.now - opts.firstSeen) / 3600;
   const fadeAfter = live ? LIVE.fadeAfterHours : 8;
-  const peakRatio = live ? 0.5 : 0.35;
+  const peakRatio = live ? 0.45 : 0.35;
 
-  if (opts.count >= 2 && hoursSinceLast > fadeAfter) return 'fade';
-  if (opts.count >= 5 && opts.velocityPerHour >= 2 &&
+  // Confirmed metas stick in fade only after a long quiet stretch.
+  if (opts.count >= 3 && hoursSinceLast > fadeAfter) return 'fade';
+
+  // Peak / money — needs real size, not a 3-coin cluster.
+  if (opts.count >= 10 && opts.velocityPerHour >= 2 &&
       opts.velocityRecentHour < opts.velocityPerHour * peakRatio) return 'peak';
-  if (opts.avgMcap >= 8000 && opts.count >= 4) return 'momentum';
-  if (opts.topMcap >= 15000 && opts.count >= 3) return 'momentum';
-  if (live && opts.count >= 5 && opts.velocityRecentHour >= 3) return 'momentum';
-  if (opts.count >= 6 && opts.velocityRecentHour >= 3) return 'copycat';
-  if (opts.count >= 4 && opts.velocityRecentHour >= 2) return 'copycat';
-  if (live && opts.count >= 3 && opts.velocityRecentHour >= 2) return 'copycat';
-  if (opts.count >= 3 && hoursSinceFirst <= (live ? 2 : 3)) return 'recognition';
+  if (opts.avgMcap >= 8000 && opts.count >= 8) return 'momentum';
+  if (opts.topMcap >= 20000 && opts.count >= 6) return 'momentum';
+  if (live && opts.count >= 10 && opts.velocityRecentHour >= 4) return 'momentum';
+  if (opts.count >= 12 && opts.velocityRecentHour >= 3) return 'copycat';
+  if (opts.count >= 8 && opts.velocityRecentHour >= 3) return 'copycat';
+
+  // Recognition is the main mid-stage — 3–7 related launches noticing the theme.
+  // Do NOT jump these straight to copycat just because velocity ticks up.
+  if (opts.count >= 3 && opts.count < 8) return 'recognition';
+  if (opts.count >= 3 && hoursSinceFirst <= (live ? 12 : 24) && opts.count < 10) return 'recognition';
+
   if (opts.count >= 2) return 'naming';
   return 'spark';
 }
@@ -775,7 +798,8 @@ export function analyzeMetas(
     const unique = new Map<string, LaunchRecord>();
     for (const l of group) unique.set(l.mint, l);
     const deduped = [...unique.values()];
-    if (deduped.length < MIN_IMAGE_CLUSTER) continue;
+    const minImg = live ? LIVE.minEmergingTokens : MIN_IMAGE_CLUSTER;
+    if (deduped.length < minImg) continue;
     imageGroups.push(deduped);
     for (const l of deduped) imageGroupedMints.add(l.mint);
   }
@@ -844,8 +868,18 @@ export function analyzeMetas(
   const fading = dedupedTracks.filter((m) => m.stage === 'fade').slice(0, 6);
 
   const stageCounts = new Map<MetaStage, number>();
+  const stageTokenCounts: Record<MetaStage, number> = {
+    spark: 0,
+    naming: 0,
+    recognition: 0,
+    copycat: 0,
+    momentum: 0,
+    peak: 0,
+    fade: 0,
+  };
   for (const m of dedupedTracks) {
     stageCounts.set(m.stage, (stageCounts.get(m.stage) ?? 0) + 1);
+    stageTokenCounts[m.stage] = (stageTokenCounts[m.stage] ?? 0) + m.launchCount;
   }
   const dominantStage =
     [...stageCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'recognition';
@@ -854,12 +888,12 @@ export function analyzeMetas(
   let insight: string;
   if (!top) {
     insight = live
-      ? `Scanning ${recent.length} creates (24h) — clusters form at 2+ tokens, metas at ${LIVE.minMetaTokens}+.`
+      ? `Scanning ${recent.length} creates — clusters at ${LIVE.minEmergingTokens}+, confirmed metas at ${LIVE.minMetaTokens}+ tokens.`
       : `No qualified metas yet — need ${MIN_META_TOKENS}+ tokens with measurable velocity, or ${MIN_FORMING_TOKENS}+ forming fast. Single launches don't count.`;
   } else if (emerging.length > 0 && !active.length) {
     insight = `${emerging.length} emerging cluster(s) — "${emerging[0]!.theme}" at ${emerging[0]!.stageLabel} (${emerging[0]!.launchCount} tokens).`;
   } else if (forming.length > 0 && !active.length) {
-    insight = `${forming.length} cluster(s) forming — "${forming[0]!.theme}" has ${forming[0]!.launchCount} tokens at ${forming[0]!.velocityPerHour}/hr. Not a meta until ${MIN_META_TOKENS}+ deploys.`;
+    insight = `${forming.length} cluster(s) forming — "${forming[0]!.theme}" has ${forming[0]!.launchCount} tokens. Not confirmed until ${LIVE.minMetaTokens}+ deploys.`;
   } else if (forming.length > 0) {
     insight = `"${top.theme}" is the lead meta (${top.launchCount} tokens). ${forming.length} more cluster(s) building momentum.`;
   } else if (top.stage === 'copycat' || top.stage === 'momentum') {
@@ -877,6 +911,7 @@ export function analyzeMetas(
     dominantStage,
     insight,
     stages: STAGE_DEFS,
+    stageTokenCounts,
     emerging,
     forming,
     active,

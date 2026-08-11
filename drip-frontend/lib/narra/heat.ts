@@ -85,6 +85,7 @@ export interface TimelineEvent {
   tier: 0 | 1 | 2 | 3;
 }
 
+/** Quality score from metrics/stage only — age is NOT included (feed sorts by time). */
 export function computeOpportunityScore(
   ev: {
     at: number;
@@ -93,40 +94,61 @@ export function computeOpportunityScore(
     isSocial?: boolean;
     label: string;
     stats?: string;
+    marketCapUsd?: number;
+    volumeUsd1h?: number;
+    txns24h?: number;
+    holderCount?: number;
   },
   meta?: MetaTrack | null,
-  nowSec = Math.floor(Date.now() / 1000),
 ): number {
   let s = 0;
-  const age = nowSec - ev.at;
 
-  if (ev.stage === "momentum" || ev.stage === "copycat") s += 5;
-  if (ev.stage === "peak") s += 4;
-  if (ev.stage === "recognition") s += 2;
-  if (ev.isLaunch) s += 2;
-  if (ev.isSocial) s += 1;
+  if (ev.stage === "momentum" || ev.stage === "copycat") s += 6;
+  if (ev.stage === "peak") s += 5;
+  if (ev.stage === "recognition") s += 3;
+  if (ev.stage === "naming") s += 1;
 
   if (meta) {
     if (meta.launchCount >= 5) s += 2;
+    if (meta.launchCount >= 8) s += 2;
     if (meta.launchCount >= 12) s += 2;
     if (meta.volumeTrend === "hot") s += 4;
     if (meta.isActive) s += 2;
-    if ((meta.totalVolumeUsd1h ?? 0) > 0) s += 1;
+    const vol = meta.totalVolumeUsd1h ?? 0;
+    if (vol > 0) s += 1;
+    if (vol >= 100) s += 2;
+    if (vol >= 1000) s += 2;
     if ((meta.totalTxns24h ?? 0) >= 10) s += 2;
-    if (nowSec - meta.lastSeen <= 300) s += 2;
+    if ((meta.totalTxns24h ?? 0) >= 50) s += 2;
+    if ((meta.topMarketCapUsd ?? 0) >= 5000) s += 2;
+    if ((meta.topMarketCapUsd ?? 0) >= 20000) s += 2;
+  }
+
+  if (ev.isLaunch) {
+    const mcap = ev.marketCapUsd ?? 0;
+    const vol = ev.volumeUsd1h ?? 0;
+    const tx = ev.txns24h ?? 0;
+    const holders = ev.holderCount ?? 0;
+    // Naked creates without metrics are weak opportunities.
+    if (mcap <= 0 && vol <= 0 && tx <= 0) return Math.min(s, 2);
+    if (mcap > 0) s += 1;
+    if (mcap >= 5000) s += 2;
+    if (vol > 0) s += 1;
+    if (vol >= 50) s += 2;
+    if (vol >= 500) s += 2;
+    if (tx >= 5) s += 1;
+    if (tx >= 25) s += 2;
+    if (holders >= 20) s += 1;
   }
 
   if (ev.label.includes("mcap") || ev.label.includes("vol") || ev.label.includes("tx")) s += 1;
-  if (age <= 30) s += 3;
-  else if (age <= 120) s += 2;
-  else if (age <= 600) s += 1;
 
   return s;
 }
 
 export function opportunityTier(score: number): 0 | 1 | 2 | 3 {
-  if (score >= 10) return 3;
-  if (score >= 7) return 2;
-  if (score >= 4) return 1;
+  if (score >= 12) return 3;
+  if (score >= 8) return 2;
+  if (score >= 5) return 1;
   return 0;
 }

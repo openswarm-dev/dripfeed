@@ -2,19 +2,18 @@
 
 import { TokenImage } from "@/components/ui/TokenImage";
 import { LiveAge } from "@/components/narra/LiveAge";
-import { capitalize } from "@/lib/narra/format";
 import { displayTheme } from "@/lib/narra/displayTheme";
 import type { TimelineEvent } from "@/lib/narra/heat";
 
 const STAGE_LABELS: Record<string, string> = {
-  spark: "Spark",
-  naming: "Naming",
-  recognition: "Recognition",
-  copycat: "Copycat wave",
-  momentum: "Money follows",
-  peak: "Peak",
-  fade: "Fade",
-  launch: "Launch",
+  spark: "SPARK",
+  naming: "NAMING",
+  recognition: "RECOGNITION",
+  copycat: "COPYCAT WAVE",
+  momentum: "MONEY FOLLOWS",
+  peak: "PEAK",
+  fade: "FADE",
+  launch: "LAUNCH",
 };
 
 export function OpportunityFeedCard({
@@ -26,7 +25,7 @@ export function OpportunityFeedCard({
 }) {
   const tierClass = ev.tier > 0 ? `timeline-event--tier-${ev.tier}` : "";
   const flashClass = flash ? "timeline-event--flash" : "";
-  const stageLabel = STAGE_LABELS[ev.stage] ?? capitalize(ev.stage);
+  const stageLabel = STAGE_LABELS[ev.stage] ?? ev.stage.toUpperCase();
   const title = ev.isLaunch ? ev.theme : displayTheme(ev.theme);
 
   return (

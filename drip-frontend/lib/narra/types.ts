@@ -84,6 +84,7 @@ export interface MetaDashboard {
   dominantStage: string;
   insight: string;
   stages: Array<{ id: MetaStage; label: string; description: string }>;
+  stageTokenCounts?: Partial<Record<MetaStage, number>>;
   forming: MetaTrack[];
   emerging?: MetaTrack[];
   active: MetaTrack[];

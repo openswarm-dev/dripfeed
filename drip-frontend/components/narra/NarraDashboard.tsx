@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MetaStage, MetaTrack, LaunchRecord } from "@/lib/narra/types";
 import { fmtAge, formatCompact, capitalize } from "@/lib/narra/format";
 import { getLaunchDisplay, shouldShowLaunch } from "@/lib/narra/launchDisplay";
@@ -150,35 +150,48 @@ function NarraLoader({ onDone }: { onDone: () => void }) {
   const [meta, setMeta] = useState<"wait" | "loading" | "done">("wait");
   const [progress, setProgress] = useState(0);
   const [out, setOut] = useState(false);
+  const onDoneRef = useRef(onDone);
+  onDoneRef.current = onDone;
+  const finishedRef = useRef(false);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setGeyser("done"), 1400);
-    const t2 = setTimeout(() => { setX("loading"); }, 1600);
-    const t3 = setTimeout(() => setX("done"), 2800);
-    const t4 = setTimeout(() => { setMeta("loading"); }, 3000);
-    return () => [t1, t2, t3, t4].forEach(clearTimeout);
+    const t1 = setTimeout(() => setGeyser("done"), 900);
+    const t2 = setTimeout(() => setX("loading"), 1100);
+    const t3 = setTimeout(() => setX("done"), 2000);
+    const t4 = setTimeout(() => setMeta("loading"), 2200);
+    const t5 = setTimeout(() => setMeta("done"), 3200);
+    return () => [t1, t2, t3, t4, t5].forEach(clearTimeout);
   }, []);
 
   useEffect(() => {
+    const started = performance.now();
     const iv = setInterval(() => {
-      setProgress((p) => Math.min(p + 1.5, 92));
-    }, 60);
+      const elapsed = performance.now() - started;
+      // Ease to 92% over ~3.2s, never bounce backward.
+      const target = Math.min(92, (elapsed / 3200) * 92);
+      setProgress((p) => (target > p ? target : p));
+    }, 50);
     return () => clearInterval(iv);
   }, []);
 
   useEffect(() => {
-    const t = setTimeout(() => {
+    const finish = () => {
+      if (finishedRef.current) return;
+      finishedRef.current = true;
       setGeyser("done");
       setX("done");
       setMeta("done");
       setProgress(100);
       setTimeout(() => {
         setOut(true);
-        setTimeout(onDone, 550);
-      }, 700);
-    }, 6000);
+        setTimeout(() => onDoneRef.current(), 450);
+      }, 400);
+    };
+
+    // Minimum show time so steps can play; then exit once.
+    const t = setTimeout(finish, 3800);
     return () => clearTimeout(t);
-  }, [onDone]);
+  }, []);
 
   const step = (id: string, status: typeof geyser, label: string) => (
     <div className={`loader-step ${status === "loading" ? "active" : ""} ${status === "done" ? "done" : ""}`} id={`loader-${id}`}>
@@ -231,7 +244,7 @@ export default function NarraDashboard({
   state,
   error,
   loading,
-  loaderDone,
+  loaderDone: _loaderDone,
   onLoaderDone,
 }: {
   state: import("@/lib/narra/types").NarraState | null;
@@ -298,31 +311,33 @@ export default function NarraDashboard({
   const seenEventsRef = useRef<Set<string>>(new Set());
   const [flashKeys, setFlashKeys] = useState<Set<string>>(new Set());
 
+  const dismissLoader = useCallback(() => {
+    setShowLoader(false);
+    setAppVisible(true);
+    onLoaderDone();
+  }, [onLoaderDone]);
+
   useEffect(() => {
     if (loading) return;
     if (error) {
-      setShowLoader(false);
-      setAppVisible(true);
+      dismissLoader();
       return;
     }
-    if (loaderDone) {
-      setShowLoader(false);
-      setAppVisible(true);
-      onLoaderDone();
-    }
-  }, [loaderDone, loading, error, onLoaderDone]);
+    // Don't hard-cut the branded loader when SSE connects early —
+    // NarraLoader finishes on its own timeline via dismissLoader.
+  }, [loading, error, dismissLoader]);
 
   const formingClusters = useMemo(() => {
     if (!metas) return [];
     const staged = sortMetasByStage([...(metas.emerging ?? []), ...metas.forming], stageFilter, sparks);
-    return sortMetasByHeat(staged, heatLevels);
-  }, [metas, stageFilter, sparks, heatLevels]);
+    return sortMetasByHeat(staged);
+  }, [metas, stageFilter, sparks]);
 
   const activeMetas = useMemo(() => {
     if (!metas) return [];
     const staged = sortMetasByStage(metas.active, stageFilter, sparks);
-    return sortMetasByHeat(staged, heatLevels);
-  }, [metas, stageFilter, sparks, heatLevels]);
+    return sortMetasByHeat(staged);
+  }, [metas, stageFilter, sparks]);
 
   const hero = activeMetas[0]
     ?? formingClusters[0]
@@ -337,7 +352,6 @@ export default function NarraDashboard({
   }, [stageFilter, metas, sparks]);
 
   const timelineEvents = useMemo(() => {
-    const nowSec = Math.floor(Date.now() / 1000);
     const events: TimelineEvent[] = [];
     const seenMints = new Set<string>();
     const seenMetas = new Set<string>();
@@ -358,7 +372,11 @@ export default function NarraDashboard({
         stage: "launch",
         isLaunch: true,
         label,
-      }, null, nowSec) + ((l.volumeUsd1h ?? 0) > 50 || (l.txns24h ?? 0) > 5 ? 2 : 0);
+        marketCapUsd: l.marketCapUsd,
+        volumeUsd1h: l.volumeUsd1h,
+        txns24h: l.txns24h,
+        holderCount: l.holderCount,
+      }, null);
       events.push({
         feedId: `launch:${l.mint}`,
         at: l.blockTime,
@@ -371,7 +389,7 @@ export default function NarraDashboard({
         opportunityScore: score,
         tier: opportunityTier(score),
       });
-      if (events.length >= 40) break;
+      if (events.length >= 60) break;
     }
 
     if (metas) {
@@ -389,7 +407,7 @@ export default function NarraDashboard({
           stage: m.stage,
           label,
           stats,
-        }, m, nowSec);
+        }, m);
         events.push({
           feedId: `meta:${m.id}`,
           at: m.lastSeen,
@@ -405,22 +423,29 @@ export default function NarraDashboard({
       }
     }
 
-    events.sort((a, b) => {
-      if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
-      return b.at - a.at;
+    // Keep the strongest setups, then show newest → oldest so the feed reads chronologically.
+    const quality = events
+      .filter((e) => e.tier >= 1 || e.opportunityScore >= 5)
+      .sort((a, b) => {
+        if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+        return b.at - a.at;
+      })
+      .slice(0, 80);
+
+    return [...quality].sort((a, b) => {
+      if (b.at !== a.at) return b.at - a.at;
+      return b.opportunityScore - a.opportunityScore;
     });
-    return events;
   }, [launches, metas]);
 
-  const opportunityFeed = useMemo(() => timelineEvents.slice(0, 80), [timelineEvents]);
+  const opportunityFeed = timelineEvents;
 
   const opportunityFeedItems = useMemo(
     () => opportunityFeed.map((ev) => ({
       ...ev,
       id: ev.feedId,
-      isNew: flashKeys.has(ev.feedId),
     })),
-    [opportunityFeed, flashKeys],
+    [opportunityFeed],
   );
 
   const formingFeedItems = useMemo(
@@ -474,7 +499,7 @@ export default function NarraDashboard({
   }, [metas, geyserStats?.perMinute]);
 
   if (showLoader) {
-    return <NarraLoader onDone={() => { setShowLoader(false); setAppVisible(true); onLoaderDone(); }} />;
+    return <NarraLoader onDone={dismissLoader} />;
   }
 
   return (
@@ -590,25 +615,27 @@ export default function NarraDashboard({
           </BetttrCard>
 
           <BetttrCard accent="timeline">
-            {metas && hero && (
+            {metas && (
               <div className="stage-pipeline">
-                {metas.stages.map((s, i) => {
-                  const current = hero.stageIndex;
-                  let cls = "stage-step";
-                  if (i < current) cls += " done";
-                  else if (i === current) cls += " current";
-                  else cls += " future";
+                {metas.stages.map((s) => {
+                  const tokenCount = metas.stageTokenCounts?.[s.id as MetaStage]
+                    ?? [...(metas.emerging ?? []), ...metas.forming, ...metas.active, ...(metas.fading ?? [])]
+                      .filter((m) => m.stage === s.id)
+                      .reduce((sum, m) => sum + m.launchCount, 0);
+                  let cls = "stage-step stage-step--holo";
+                  if (hero && s.id === hero.stage) cls += " current";
                   if (stageFilter === s.id) cls += " filter-on";
+                  if (tokenCount > 0) cls += " has-count";
                   return (
                     <button
                       key={s.id}
                       type="button"
                       className={cls}
-                      title={`Filter forming & active by ${s.label}`}
+                      title={`${s.label}: ${tokenCount} tokens — ${s.description}`}
                       onClick={() => setStageFilter((prev) => (prev === s.id ? null : s.id))}
                     >
-                      <div className="step-num">{i + 1}</div>
-                      <div className="step-name">{s.label}</div>
+                      <span className="opp-badge stage-step-badge">{s.label.toUpperCase()}</span>
+                      <div className="step-count">{tokenCount}</div>
                     </button>
                   );
                 })}
@@ -629,7 +656,7 @@ export default function NarraDashboard({
           <div className="row-main">
             <BetttrCard accent="timeline">
               <PanelTitle count={opportunityFeed.filter((e) => e.tier >= 2).length} variant="live">Opportunity feed</PanelTitle>
-              <p className="panel-hint">Best setups first — ranked by activity &amp; stage</p>
+              <p className="panel-hint">Strongest setups · newest first</p>
               <div className="card-scroll" id="timelineFeed">
                 {!opportunityFeed.length ? (
                   <p className="empty">Watching for momentum…</p>
@@ -653,7 +680,7 @@ export default function NarraDashboard({
               <p className="panel-hint">Clusters forming — hottest rise to the top</p>
               <div className="card-scroll">
                 {!formingClusters.length ? (
-                  <p className="empty">Watching for 2+ token clusters…</p>
+                  <p className="empty">Watching for 5+ token clusters…</p>
                 ) : (
                   <AnimatedFeed
                     className="animated-feed"
