@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { MetaStage, MetaTrack, LaunchRecord } from "@/lib/narra/types";
 import { fmtAge, fmtTime, formatCompact, capitalize, findMeta } from "@/lib/narra/format";
+import { getLaunchDisplay, shouldShowLaunch } from "@/lib/narra/launchDisplay";
 import { BetttrCard, PanelTitle } from "@/components/ui/BetttrCard";
 import { TokenImage } from "@/components/ui/TokenImage";
 
@@ -317,6 +318,11 @@ export default function NarraDashboard({
   }
   timelineEvents.sort((a, b) => b.at - a.at);
 
+  const visibleLaunches = useMemo(
+    () => launches.filter((l) => shouldShowLaunch(l)),
+    [launches],
+  );
+
   const progressPct = useMemo(() => {
     if (!metas) return 8;
     const active = metas.activeMetaCount ?? 0;
@@ -542,12 +548,12 @@ export default function NarraDashboard({
             </BetttrCard>
 
             <BetttrCard accent="launch">
-              <PanelTitle count={launches.length} variant="live">New launches</PanelTitle>
+              <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
               <p className="panel-hint">Every pump.fun create as it happens — click ↗ to open</p>
               <div className="card-scroll">
-                {!launches.length ? (
+                {!visibleLaunches.length ? (
                   <p className="empty">Waiting for CreateV2 stream…</p>
-                ) : launches.slice(0, 60).map((l) => (
+                ) : visibleLaunches.slice(0, 60).map((l) => (
                   <LaunchRow key={l.mint + l.signature} l={l} />
                 ))}
               </div>
@@ -601,25 +607,24 @@ export default function NarraDashboard({
 }
 
 function LaunchRow({ l }: { l: LaunchRecord }) {
-  const label = l.symbol || l.name || l.mint.slice(0, 8);
-  const sub = l.name && l.symbol && l.name !== l.symbol ? l.name : null;
+  const { label, sub, pending } = getLaunchDisplay(l);
   const ageSec = l.blockTime ? Math.floor(Date.now() / 1000) - l.blockTime : null;
 
   return (
-    <div className="launch-row">
+    <div className={`launch-row ${pending ? "launch-row--pending" : ""}`}>
       <TokenImage src={l.image} size={30} />
       <div className="launch-meta">
-        <div className="sym">
+        <div className={`sym ${pending ? "sym--pending" : ""}`}>
           {label}
-          {l.isCreateV2 && <span className="v2-tag">V2</span>}
+          {l.isCreateV2 && !pending && <span className="v2-tag">V2</span>}
         </div>
-        {sub && <div className="name-line">{sub}</div>}
+        {sub && <div className={`name-line ${pending ? "name-line--pending" : ""}`}>{sub}</div>}
       </div>
       <div className="launch-side">
         {l.blockTime && (
           <span className="age-tag launch-age" data-ts={l.blockTime}>{fmtAge(ageSec)}</span>
         )}
-        {l.volumeUsd1h ? <span className="vol-tag">${formatCompact(l.volumeUsd1h)}</span> : null}
+        {!pending && l.volumeUsd1h ? <span className="vol-tag">${formatCompact(l.volumeUsd1h)}</span> : null}
         <a href={`https://pump.fun/coin/${l.mint}`} target="_blank" rel="noopener noreferrer" title="Open on pump.fun">↗</a>
       </div>
     </div>

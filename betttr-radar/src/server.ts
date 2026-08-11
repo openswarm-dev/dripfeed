@@ -20,6 +20,8 @@ import {
   setupTweetStreamAccounts,
   fetchTweetStreamMe,
 } from './tweetStreamFeed.js';
+import { enrichLaunchLive } from './enrich.js';
+import { getState, updateLaunch } from './liveStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -160,6 +162,24 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
+async function enrichStaleLaunches() {
+  const pending = getState().launches
+    .filter((l) => {
+      const hasLabel = (l.symbol?.trim() || l.name?.trim()) && l.symbol !== l.mint.slice(0, 8);
+      return !hasLabel || !l.image;
+    })
+    .slice(0, 12);
+
+  for (const l of pending) {
+    try {
+      const enriched = await enrichLaunchLive(l);
+      updateLaunch(enriched);
+    } catch {
+      /* retry next interval */
+    }
+  }
+}
+
 server.listen(config.port, HOST, async () => {
   console.log(`\n  Betttr.xyz Meta Radar (live)`);
   console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
@@ -168,6 +188,7 @@ server.listen(config.port, HOST, async () => {
   setInterval(recalcMetas, 10_000);
   setInterval(() => void refreshLaunchVolumes(), 30_000);
   setInterval(refreshFromReport, 60_000);
+  setInterval(() => void enrichStaleLaunches(), 12_000);
 
   if (config.tweetstreamApiKey) {
     await fetchTweetStreamMe();

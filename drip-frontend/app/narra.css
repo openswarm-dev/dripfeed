@@ -844,6 +844,21 @@
   margin-bottom: 3px;
 }
 
+.launch-row--pending {
+  opacity: 0.85;
+}
+
+.launch-row .sym--pending {
+  color: var(--radar-subtle);
+  font-style: italic;
+  font-weight: 600;
+}
+
+.launch-row .name-line--pending {
+  color: var(--radar-faint);
+  font-size: 10px;
+}
+
 .launch-row:hover {
   border-color: rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.04);
