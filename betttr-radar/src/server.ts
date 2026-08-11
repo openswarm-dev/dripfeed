@@ -11,9 +11,9 @@ import {
   refreshFromReport,
   setTweetStreamAccounts,
   recalcMetas,
-  refreshLaunchVolumes,
   updateLaunch,
   forceRefreshLaunch,
+  syncRecentPumpCreates,
 } from './liveStore.js';
 import { startGeyserFeed } from './geyserFeed.js';
 import { startRpcPollFeed } from './rpcPollFeed.js';
@@ -24,6 +24,9 @@ import {
 } from './tweetStreamFeed.js';
 import { enrichLaunchLive } from './enrich.js';
 import { flushPersist } from './persist.js';
+import { ensureAuthSchema } from './authStore.js';
+import { handleAuthApi, handleWalletApi } from './authApi.js';
+import { turnkeyConfigured } from './turnkey.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -117,21 +120,17 @@ async function enrichStaleLaunches() {
     .filter((l) => {
       const hasLabel = (l.symbol?.trim() || l.name?.trim()) && l.symbol !== l.mint.slice(0, 8);
       const missingVisual = !hasLabel || !l.image;
-      const missingMetrics =
-        l.marketCapUsd == null
-        || l.holderCount == null
-        || (l.volumeUsd1h == null && l.txns24h == null);
       const ageOk = !l.blockTime || now - l.blockTime <= 3600;
-      return ageOk && (missingVisual || missingMetrics);
+      return ageOk && missingVisual;
     })
     .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    .slice(0, 24);
+    .slice(0, 12);
 
   await Promise.all(
     pending.map(async (l) => {
       try {
-        const enriched = await enrichLaunchLive(l, (partial) => updateLaunch(partial));
-        updateLaunch(enriched);
+        const enriched = await enrichLaunchLive(l, (partial) => updateLaunch(partial, { soft: true }));
+        updateLaunch(enriched, { soft: true });
       } catch {
         /* retry next interval */
       }
@@ -151,7 +150,29 @@ const server = http.createServer((req, res) => {
 
   if (url === '/health') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, service: 'betttr-radar' }));
+    res.end(JSON.stringify({
+      ok: true,
+      service: 'betttr-radar',
+      turnkeyConfigured: turnkeyConfigured(),
+      auth: true,
+    }));
+    return;
+  }
+
+  // Auth + Turnkey wallet (Hetzner) — username/password create account
+  if (url.startsWith('/api/auth') || url.startsWith('/api/wallet')) {
+    const fullUrl = req.url ?? url;
+    void (async () => {
+      try {
+        if (await handleAuthApi(req, res, fullUrl)) return;
+        if (await handleWalletApi(req, res, fullUrl.split('?')[0] ?? url)) return;
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Not found' }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
+    })();
     return;
   }
 
@@ -219,16 +240,19 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-void initLiveStore().then(() => {
+void initLiveStore().then(async () => {
+  await ensureAuthSchema();
   server.listen(config.port, HOST, async () => {
     console.log(`\n  Betttr.xyz Meta Radar (live)`);
-    console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
+    console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}`);
+    console.log(`  Turnkey: ${turnkeyConfigured() ? 'configured' : 'DEV mode (set TURNKEY_* in .env)'}\n`);
 
     setInterval(heartbeat, 25_000);
-    setInterval(recalcMetas, 20_000);
-    setInterval(() => void refreshLaunchVolumes(), 8_000);
+    setInterval(recalcMetas, 8_000);
+    // Identity-only gap-fill (one list call) — not per-mint metrics.
+    setInterval(() => void syncRecentPumpCreates(), 3_000);
     setInterval(refreshFromReport, 120_000);
-    setInterval(() => void enrichStaleLaunches(), 6_000);
+    setInterval(() => void enrichStaleLaunches(), 12_000);
     setInterval(() => flushPersist(), 45_000);
 
     if (config.tweetstreamApiKey) {

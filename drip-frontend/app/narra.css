@@ -427,6 +427,116 @@
   color: var(--radar-fg);
 }
 
+.auth-account-grid {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+.auth-account-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.28);
+}
+.auth-account-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.auth-account-row__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.auth-account-label {
+  font-family: var(--radar-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--radar-faint);
+}
+.auth-account-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--radar-fg);
+  text-align: right;
+}
+.auth-account-value--mono {
+  font-family: var(--radar-mono);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+.auth-account-address {
+  display: block;
+  font-family: var(--radar-mono);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--radar-fg);
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}
+.auth-account-copy {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--radar-subtle);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-family: var(--radar-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.auth-account-copy:hover:not(:disabled) {
+  color: var(--radar-fg);
+  border-color: rgba(232, 216, 255, 0.35);
+}
+.auth-account-copy:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.auth-export {
+  margin-top: 4px;
+}
+.auth-export__warn,
+.auth-export__done-hint {
+  margin: 0 0 12px;
+  color: var(--radar-subtle);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.auth-export__iframe {
+  min-height: 96px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(0, 0, 0, 0.35);
+}
+.auth-export__iframe--hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+.auth-export__addr {
+  margin: 0 0 12px;
+  font-size: 11px;
+  color: var(--radar-faint);
+  word-break: break-all;
+}
+.auth-export__addr span {
+  color: var(--radar-subtle);
+  font-family: var(--radar-mono);
+}
+
 /* ── Main layout ── */
 .app {
   position: relative;
