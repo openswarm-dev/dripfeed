@@ -106,6 +106,7 @@ export function useNarra() {
           setError(report.error ?? "Radar service unavailable");
         } else {
           setState(reportToState(report));
+          setLoaderDone(true);
         }
       } catch {
         if (!cancelled) {

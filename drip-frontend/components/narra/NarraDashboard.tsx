@@ -196,9 +196,9 @@ export default function NarraDashboard({
   loaderDone: boolean;
   onLoaderDone: () => void;
 }) {
-  const [showLoader, setShowLoader] = useState(true);
+  const [showLoader, setShowLoader] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [appVisible, setAppVisible] = useState(false);
+  const [appVisible, setAppVisible] = useState(true);
 
   const metas = state?.metas ?? null;
   const launches = state?.launches ?? [];
@@ -208,12 +208,11 @@ export default function NarraDashboard({
   const feeds = live?.feeds;
 
   useEffect(() => {
-    if (loaderDone && !loading) {
+    if (!loading && (loaderDone || error || launches.length > 0)) {
       setShowLoader(false);
       setAppVisible(true);
-      onLoaderDone();
     }
-  }, [loaderDone, loading, onLoaderDone]);
+  }, [loaderDone, loading, error, launches.length, onLoaderDone]);
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -347,7 +346,29 @@ export default function NarraDashboard({
         <div className="context-bar">
           <BetttrCard accent="hero">
             {!hero || !metas ? (
-              <p className="hero-loading">{metas?.insight ?? "No metas in lookback window"}</p>
+              <div className="hero-inner">
+                <div className="hero-theme rainbow-text">
+                  {launches.length > 0
+                    ? `Live · ${launches.length} creates streaming`
+                    : (metas?.insight ?? "Scanning pump.fun…")}
+                </div>
+                {launches.length > 0 && (
+                  <div className="hero-stats">
+                    <div className="hero-stat">
+                      <span className="val t-metric">{launches.length}</span>
+                      <span className="lbl">creates</span>
+                    </div>
+                    <div className="hero-stat">
+                      <span className="val">{geyserStats?.perMinute ?? 0}/min</span>
+                      <span className="lbl">rate</span>
+                    </div>
+                    <div className="hero-stat">
+                      <span className="val">{sparks.length}</span>
+                      <span className="lbl">sparks</span>
+                    </div>
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="hero-inner">
                 <div className="hero-theme rainbow-text">&quot;{hero.theme}&quot;</div>
