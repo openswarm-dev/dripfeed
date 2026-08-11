@@ -110,6 +110,7 @@ export interface LaunchRecord {
   bonded?: boolean;
   holderCount?: number;
   bondingProgressPct?: number;
+  volumeUpdatedAt?: number;
   marketUpdatedAt?: number;
   narratives: string[];
   primaryNarrative: string;
