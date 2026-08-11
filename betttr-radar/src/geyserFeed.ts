@@ -84,17 +84,38 @@ function decodeIxDataCheap(raw: unknown): Buffer | null {
   return null;
 }
 
-/** Scan compiled ix bytes for pump create discriminators (works when logs are truncated). */
+/** Scan outer + inner ix bytes for pump create discriminators. */
 function rawHasCreateDisc(txWrap: any): boolean {
+  const buffers: Buffer[] = [];
+  const pushIx = (ix: any) => {
+    const data = decodeIxDataCheap(ix?.data);
+    if (data && data.length >= 8) buffers.push(data);
+  };
+
   const message =
     txWrap?.transaction?.transaction?.message
     ?? txWrap?.transaction?.message
     ?? txWrap?.message;
-  const ixs = message?.instructions ?? message?.compiledInstructions ?? [];
-  if (!Array.isArray(ixs)) return false;
-  for (const ix of ixs) {
-    const data = decodeIxDataCheap(ix?.data);
-    if (!data || data.length < 8) continue;
+  const outer = message?.instructions ?? message?.compiledInstructions ?? [];
+  if (Array.isArray(outer)) {
+    for (const ix of outer) pushIx(ix);
+  }
+
+  const meta =
+    txWrap?.transaction?.meta
+    ?? txWrap?.transaction?.transaction?.meta
+    ?? txWrap?.meta
+    ?? null;
+  const inners = meta?.innerInstructions ?? meta?.inner_instructions ?? [];
+  if (Array.isArray(inners)) {
+    for (const group of inners) {
+      const groupIxs = group?.instructions ?? [];
+      if (!Array.isArray(groupIxs)) continue;
+      for (const ix of groupIxs) pushIx(ix);
+    }
+  }
+
+  for (const data of buffers) {
     const disc = data.subarray(0, 8);
     if (disc.equals(CREATE_V2_DISC) || disc.equals(CREATE_V1_DISC)) return true;
   }
