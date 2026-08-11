@@ -59,31 +59,36 @@ function minimalLaunch(parsed: {
 }
 
 function cheapLogs(txWrap: any): string[] {
-  return (
-    txWrap?.transaction?.meta?.logMessages
-    ?? txWrap?.transaction?.meta?.log_messages
-    ?? txWrap?.meta?.logMessages
-    ?? txWrap?.meta?.log_messages
-    ?? []
-  );
+  const meta =
+    txWrap?.transaction?.meta
+    ?? txWrap?.meta
+    ?? null;
+  const logs = meta?.logMessages ?? meta?.log_messages ?? [];
+  return Array.isArray(logs) ? logs : [];
 }
 
-function looksLikeNonCreate(logs: string[]): boolean {
-  if (!logs.length) return false;
-  const hasCreate = logs.some(
+let geyserRejects = 0;
+let geyserFullParses = 0;
+let geyserCreates = 0;
+setInterval(() => {
+  if (!geyserRejects && !geyserFullParses) return;
+  console.log(
+    `[geyser] 10s: reject=${geyserRejects} parse=${geyserFullParses} creates=${geyserCreates}`,
+  );
+  geyserRejects = 0;
+  geyserFullParses = 0;
+  geyserCreates = 0;
+}, 10_000);
+
+function shouldFullParse(logs: string[]): boolean {
+  // No logs → may need discriminator fallback.
+  if (!logs.length) return true;
+  // Only spend CPU when logs look like a create.
+  return logs.some(
     (l) =>
       l.includes('Instruction: Create')
       || l.includes('Instruction: CreateV2')
       || l.includes('InitializeMint2'),
-  );
-  if (hasCreate) return false;
-  return logs.some(
-    (l) =>
-      l.includes('Instruction: Buy')
-      || l.includes('Instruction: Sell')
-      || l.includes('Instruction: GetFees')
-      || l.includes('BuyProfile')
-      || l.includes('CreateIdempotent'),
   );
 }
 
@@ -160,13 +165,18 @@ export async function startGeyserFeed() {
         lastPumpTxAt = Date.now();
         pumpTxSinceCreate += 1;
 
-        // Cheap reject: ignore buys/sells before any tx decode work.
+        // Cheap reject: only full-parse creates (or txs with no logs).
         const logs = cheapLogs(txWrap);
-        if (looksLikeNonCreate(logs)) return;
+        if (!shouldFullParse(logs)) {
+          geyserRejects += 1;
+          return;
+        }
 
+        geyserFullParses += 1;
         const parsed = parsePumpCreateGeyser(txWrap);
         if (!parsed) return;
         recordCreateParsed();
+        geyserCreates += 1;
         lastCreateAt = Date.now();
         pumpTxSinceCreate = 0;
 

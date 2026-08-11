@@ -289,9 +289,9 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
         tweetstreamAccounts: state.feeds.tweetstreamAccounts,
       },
     };
+    // Only send the patched launch — never re-serialize the whole feed on every enrich tick.
     broadcast('launch', {
       launch: launches[idx],
-      launches: state.launches.slice(0, 200),
       geyserStats: { ...geyserStats },
       liveLaunches: state.liveLaunches,
     });
