@@ -70,6 +70,34 @@ function rpcUrl(): string {
   );
 }
 
+/** Fast balance via raw JSON-RPC — avoids flaky/slow @solana/web3.js Connection. */
+async function fetchSolBalanceLamports(address: string): Promise<number | null> {
+  if (!address || address.startsWith('DEV')) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  try {
+    const res = await fetch(heliusOrRpcUrl(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'getBalance',
+        params: [address],
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { result?: { value?: number } };
+    const value = data.result?.value;
+    return typeof value === 'number' ? value : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function handleAuthApi(
   req: IncomingMessage,
   res: ServerResponse,
@@ -148,11 +176,14 @@ export async function handleAuthApi(
       json(res, 404, { error: 'User not found' });
       return true;
     }
+    const balanceLamports = wallet ? await fetchSolBalanceLamports(wallet.address) : null;
     json(res, 200, {
       user,
       wallet: wallet
         ? { address: wallet.address, createdAt: wallet.createdAt }
         : null,
+      balanceLamports,
+      balanceSol: balanceLamports != null ? balanceLamports / LAMPORTS_PER_SOL : null,
       turnkeyConfigured: turnkeyConfigured(),
     });
     return true;
@@ -166,7 +197,7 @@ export async function handleWalletApi(
   res: ServerResponse,
   url: string,
 ): Promise<boolean> {
-  // GET /api/wallet/balance  (Helius-backed SOL balance)
+  // GET /api/wallet/balance  (Helius raw RPC — ~50–100ms)
   if ((url === '/api/wallet/balance' || url === '/api/wallet/deposit') && req.method === 'GET') {
     const auth = requireUser(req, res);
     if (!auth) return true;
@@ -175,15 +206,7 @@ export async function handleWalletApi(
       json(res, 404, { error: 'No wallet for this account' });
       return true;
     }
-    let balanceLamports: number | null = null;
-    try {
-      if (!wallet.address.startsWith('DEV')) {
-        const conn = new Connection(heliusOrRpcUrl(), 'confirmed');
-        balanceLamports = await conn.getBalance(new PublicKey(wallet.address));
-      }
-    } catch {
-      /* non-fatal */
-    }
+    const balanceLamports = await fetchSolBalanceLamports(wallet.address);
     json(res, 200, {
       address: wallet.address,
       balanceLamports,

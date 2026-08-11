@@ -176,8 +176,7 @@ export async function exportWalletAccountBundle(input: {
     throw new Error('Turnkey is not configured on this server');
   }
 
-  await assertSubOrgServerAccess(input.subOrgId);
-
+  // Skip slow getUsers preflight — export fails with ORGANIZATION_MISMATCH if key missing.
   const api = subOrgTurnkeyClient(input.subOrgId);
   try {
     const response = await api.exportWalletAccount({

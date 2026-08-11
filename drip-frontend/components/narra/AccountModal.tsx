@@ -53,6 +53,8 @@ export function useBetttrAuth() {
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<BetttrUser | null>(null);
   const [wallet, setWallet] = useState<BetttrWallet | null>(null);
+  const [balanceSol, setBalanceSol] = useState<number | null>(null);
+  const [balanceReady, setBalanceReady] = useState(false);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -70,11 +72,25 @@ export function useBetttrAuth() {
   }, []);
 
   useEffect(() => {
-    if (!token) return;
-    void api<{ user: BetttrUser; wallet: BetttrWallet | null }>("/auth/me", { token })
+    if (!token) {
+      setBalanceSol(null);
+      setBalanceReady(false);
+      return;
+    }
+    void api<{
+      user: BetttrUser;
+      wallet: BetttrWallet | null;
+      balanceSol?: number | null;
+    }>("/auth/me", { token })
       .then((data) => {
         setUser(data.user);
         setWallet(data.wallet);
+        if (typeof data.balanceSol === "number") {
+          setBalanceSol(data.balanceSol);
+          setBalanceReady(true);
+        } else {
+          setBalanceReady(false);
+        }
         localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       })
       .catch(() => {
@@ -83,7 +99,21 @@ export function useBetttrAuth() {
         setToken(null);
         setUser(null);
         setWallet(null);
+        setBalanceSol(null);
+        setBalanceReady(false);
       });
+  }, [token]);
+
+  const refreshBalance = useCallback(async () => {
+    if (!token) return null;
+    try {
+      const data = await api<{ balanceSol: number | null }>("/wallet/balance", { token });
+      setBalanceSol(data.balanceSol);
+      setBalanceReady(true);
+      return data.balanceSol;
+    } catch {
+      return null;
+    }
   }, [token]);
 
   const persist = useCallback((t: string, u: BetttrUser, w: BetttrWallet | null) => {
@@ -92,6 +122,8 @@ export function useBetttrAuth() {
     setToken(t);
     setUser(u);
     setWallet(w);
+    setBalanceSol(null);
+    setBalanceReady(false);
   }, []);
 
   const register = useCallback(async (username: string, password: string) => {
@@ -101,6 +133,8 @@ export function useBetttrAuth() {
       wallet: BetttrWallet;
     }>("/auth/register", { method: "POST", body: { username, password } });
     persist(data.token, data.user, data.wallet);
+    setBalanceSol(0);
+    setBalanceReady(true);
     return data;
   }, [persist]);
 
@@ -120,6 +154,8 @@ export function useBetttrAuth() {
     setToken(null);
     setUser(null);
     setWallet(null);
+    setBalanceSol(null);
+    setBalanceReady(false);
   }, []);
 
   const checkUsername = useCallback(async (username: string) => {
@@ -129,7 +165,19 @@ export function useBetttrAuth() {
     return data.available;
   }, []);
 
-  return { ready, token, user, wallet, register, login, logout, checkUsername };
+  return {
+    ready,
+    token,
+    user,
+    wallet,
+    balanceSol,
+    balanceReady,
+    refreshBalance,
+    register,
+    login,
+    logout,
+    checkUsername,
+  };
 }
 
 function formatSol(n: number | null | undefined) {
@@ -322,32 +370,18 @@ function AccountPanel({
   onClose: () => void;
 }) {
   const address = auth.wallet?.address ?? null;
-  const [balanceSol, setBalanceSol] = useState<number | null>(null);
-  const [balanceLoading, setBalanceLoading] = useState(true);
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
+  // Soft refresh in background if we already have a cached balance from /auth/me
   useEffect(() => {
     if (!auth.token) return;
-    let cancelled = false;
-    setBalanceLoading(true);
-    void api<{ balanceSol: number | null; address: string }>("/wallet/balance", {
-      token: auth.token,
-    })
-      .then((data) => {
-        if (cancelled) return;
-        setBalanceSol(data.balanceSol);
-      })
-      .catch(() => {
-        if (!cancelled) setBalanceSol(null);
-      })
-      .finally(() => {
-        if (!cancelled) setBalanceLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [auth.token]);
+    if (auth.balanceReady) {
+      void auth.refreshBalance();
+      return;
+    }
+    void auth.refreshBalance();
+  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copyAddress = async () => {
     if (!address) return;
@@ -381,7 +415,7 @@ function AccountPanel({
         <div className="auth-account-row">
           <span className="auth-account-label">Balance</span>
           <span className="auth-account-value auth-account-value--mono">
-            {balanceLoading ? "Loading…" : formatSol(balanceSol)}
+            {auth.balanceReady ? formatSol(auth.balanceSol) : "…"}
           </span>
         </div>
 
@@ -438,17 +472,51 @@ function ExportKeyFlow({
   onCancel: () => void;
 }) {
   const stamperRef = useRef<IframeStamper | null>(null);
+  const warmReadyRef = useRef(false);
   const [stage, setStage] = useState<ExportStage>("unlock");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [iframeVisible, setIframeVisible] = useState(false);
   const [exportedAddress, setExportedAddress] = useState<string | null>(null);
   const [copiedHint, setCopiedHint] = useState(false);
+  const [iframeReady, setIframeReady] = useState(false);
 
+  // Warm Turnkey iframe while the user types their password
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const container = document.getElementById(IFRAME_CONTAINER_ID);
+        if (!container) return;
+        stamperRef.current?.clear();
+        stamperRef.current = null;
+        container.replaceChildren();
+
+        const stamper = new IframeStamper({
+          iframeUrl: EXPORT_IFRAME_URL,
+          iframeContainer: container,
+          iframeElementId: IFRAME_ELEMENT_ID,
+        });
+        await stamper.init();
+        if (cancelled) {
+          stamper.clear();
+          return;
+        }
+        await stamper.applySettings({ styles: IFRAME_STYLES });
+        stamperRef.current = stamper;
+        warmReadyRef.current = Boolean(stamper.publicKey());
+        setIframeReady(warmReadyRef.current);
+      } catch {
+        warmReadyRef.current = false;
+        setIframeReady(false);
+      }
+    })();
+
     return () => {
+      cancelled = true;
       stamperRef.current?.clear();
       stamperRef.current = null;
+      warmReadyRef.current = false;
     };
   }, []);
 
@@ -469,22 +537,20 @@ function ExportKeyFlow({
     setExportedAddress(null);
 
     try {
-      const container = document.getElementById(IFRAME_CONTAINER_ID);
-      if (!container) throw new Error("Export container missing");
-
-      stamperRef.current?.clear();
-      stamperRef.current = null;
-      container.replaceChildren();
-
-      const stamper = new IframeStamper({
-        iframeUrl: EXPORT_IFRAME_URL,
-        iframeContainer: container,
-        iframeElementId: IFRAME_ELEMENT_ID,
-      });
-
-      await stamper.init();
-      stamperRef.current = stamper;
-      await stamper.applySettings({ styles: IFRAME_STYLES });
+      let stamper = stamperRef.current;
+      if (!stamper || !stamper.publicKey()) {
+        const container = document.getElementById(IFRAME_CONTAINER_ID);
+        if (!container) throw new Error("Export container missing");
+        container.replaceChildren();
+        stamper = new IframeStamper({
+          iframeUrl: EXPORT_IFRAME_URL,
+          iframeContainer: container,
+          iframeElementId: IFRAME_ELEMENT_ID,
+        });
+        await stamper.init();
+        await stamper.applySettings({ styles: IFRAME_STYLES });
+        stamperRef.current = stamper;
+      }
 
       const targetPublicKey = stamper.publicKey();
       if (!targetPublicKey) {
@@ -544,6 +610,7 @@ function ExportKeyFlow({
             onChange={(e) => setPassword(e.target.value)}
             autoComplete="current-password"
             placeholder="your account password"
+            autoFocus
             onKeyDown={(e) => {
               if (e.key === "Enter") void reveal();
             }}
@@ -575,7 +642,7 @@ function ExportKeyFlow({
       {stage === "loading" ? (
         <button type="button" className="auth-modal__cta" disabled>
           <span className="auth-modal__cta-glow rainbow-bg" aria-hidden="true" />
-          <span className="auth-modal__cta-label">Preparing secure export…</span>
+          <span className="auth-modal__cta-label">Unlocking…</span>
         </button>
       ) : stage === "done" ? (
         <button type="button" className="auth-modal__cta" onClick={copyKeyHint}>
@@ -588,7 +655,11 @@ function ExportKeyFlow({
         <button type="button" className="auth-modal__cta" onClick={() => void reveal()}>
           <span className="auth-modal__cta-glow rainbow-bg" aria-hidden="true" />
           <span className="auth-modal__cta-label">
-            {stage === "error" ? "Try again" : "Unlock & reveal key"}
+            {stage === "error"
+              ? "Try again"
+              : iframeReady
+                ? "Unlock & reveal key"
+                : "Unlock & reveal key"}
           </span>
         </button>
       )}
