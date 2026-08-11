@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { getRadarApiUrl } from "@/lib/radarApiUrl";
 
-const RADAR_API = getRadarApiUrl();
+const RADAR_API = process.env.RADAR_API_URL ?? "http://localhost:3950";
 
 export const dynamic = "force-dynamic";
 

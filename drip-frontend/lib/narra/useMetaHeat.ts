@@ -117,15 +117,14 @@ export function sortMetasByHeat(
   metas: MetaTrack[],
   _levels?: Map<string, number>,
 ): MetaTrack[] {
-  // Stable ranking — do NOT use smooth heat levels (they tick ~80ms and cause feed churn).
+  // Rank by recency of cluster activity, then size — so Building/Hot visibly move
+  // when new tokens join, without thrashing on volume noise.
   return [...metas].sort((a, b) => {
+    if ((b.lastSeen ?? 0) !== (a.lastSeen ?? 0)) return (b.lastSeen ?? 0) - (a.lastSeen ?? 0);
     if (b.launchCount !== a.launchCount) return b.launchCount - a.launchCount;
     const va = a.totalVolumeUsd1h ?? 0;
     const vb = b.totalVolumeUsd1h ?? 0;
     if (vb !== va) return vb - va;
-    const ta = a.totalTxns24h ?? 0;
-    const tb = b.totalTxns24h ?? 0;
-    if (tb !== ta) return tb - ta;
-    return (b.lastSeen ?? 0) - (a.lastSeen ?? 0);
+    return (b.velocityPerHour ?? 0) - (a.velocityPerHour ?? 0);
   });
 }

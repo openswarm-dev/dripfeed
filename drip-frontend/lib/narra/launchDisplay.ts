@@ -42,5 +42,6 @@ export function shouldShowLaunch(l: LaunchRecord, nowSec = Math.floor(Date.now()
   const { pending } = getLaunchDisplay(l);
   if (!pending) return true;
   if (!l.blockTime) return true;
-  return nowSec - l.blockTime < 90;
+  // Keep unresolved creates visible for 3 minutes while metadata loads.
+  return nowSec - l.blockTime < 180;
 }

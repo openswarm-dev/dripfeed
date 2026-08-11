@@ -129,8 +129,11 @@ export function computeOpportunityScore(
     const vol = ev.volumeUsd1h ?? 0;
     const tx = ev.txns24h ?? 0;
     const holders = ev.holderCount ?? 0;
-    // Naked creates without metrics are weak opportunities.
-    if (mcap <= 0 && vol <= 0 && tx <= 0) return Math.min(s, 2);
+
+    // Fixed floor for naked creates — do NOT use Date.now() age (causes constant re-sort).
+    if (mcap <= 0 && vol <= 0 && tx <= 0) {
+      return Math.max(s, 6);
+    }
     if (mcap > 0) s += 1;
     if (mcap >= 5000) s += 2;
     if (vol > 0) s += 1;

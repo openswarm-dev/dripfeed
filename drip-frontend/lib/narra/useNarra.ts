@@ -78,13 +78,34 @@ function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord
 function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
   const byMint = new Map<string, LaunchRecord>();
   for (const l of existing) byMint.set(l.mint, l);
+
+  const fresh: string[] = [];
   for (const l of incoming) {
     const prev = byMint.get(l.mint);
-    byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
+    if (prev) {
+      byMint.set(l.mint, mergeLaunchRecord(prev, l));
+    } else {
+      byMint.set(l.mint, l);
+      fresh.push(l.mint);
+    }
   }
-  return [...byMint.values()]
-    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    .slice(0, 5000);
+
+  // Stable feed order: keep first-seen order, prepend only brand-new mints.
+  // Never re-sort by blockTime — gap-fill was inserting mid-list and making cards jump.
+  const seen = new Set<string>();
+  const ordered: LaunchRecord[] = [];
+  for (const mint of [...fresh.reverse(), ...existing.map((l) => l.mint)]) {
+    if (seen.has(mint)) continue;
+    const row = byMint.get(mint);
+    if (!row) continue;
+    seen.add(mint);
+    ordered.push(row);
+  }
+  for (const [mint, row] of byMint) {
+    if (seen.has(mint)) continue;
+    ordered.push(row);
+  }
+  return ordered.slice(0, 5000);
 }
 
 function mergeMetas(prev: MetaDashboard | null, next: MetaDashboard | null | undefined): MetaDashboard | null {

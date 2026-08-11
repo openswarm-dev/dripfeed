@@ -14,6 +14,7 @@ import { displayTheme } from "@/lib/narra/displayTheme";
 import { AnimatedFeed } from "@/components/narra/AnimatedFeed";
 import { OpportunityFeedCard } from "@/components/narra/OpportunityFeedCard";
 import { PumpFunButton } from "@/components/ui/PumpFunButton";
+import { AccountModal, useBetttrAuth } from "@/components/narra/AccountModal";
 
 const LOGO_SRC = "/logos/Betttr.png";
 const STAGE_LABELS: Record<string, string> = {
@@ -252,7 +253,6 @@ export default function NarraDashboard({
   loading,
   loaderDone: _loaderDone,
   onLoaderDone,
-  onRefreshLaunch,
 }: {
   state: import("@/lib/narra/types").NarraState | null;
   error: string | null;
@@ -264,27 +264,19 @@ export default function NarraDashboard({
   const [showLoader, setShowLoader] = useState(true);
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
   const [appVisible, setAppVisible] = useState(false);
-  const [hoverTarget, setHoverTarget] = useState<
-    | { kind: "meta"; id: string; rect: DOMRect }
-    | { kind: "launch"; mint: string; rect: DOMRect }
-    | null
-  >(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const auth = useBetttrAuth();
+  const [hoverTarget, setHoverTarget] = useState<{
+    kind: "meta";
+    id: string;
+    rect: DOMRect;
+  } | null>(null);
   const [focusOppId, setFocusOppId] = useState<string | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastRefreshRef = useRef<string | null>(null);
 
   const showMetaHover = (m: MetaTrack, el: HTMLElement) => {
     if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
     setHoverTarget({ kind: "meta", id: m.id, rect: el.getBoundingClientRect() });
-  };
-
-  const showLaunchHover = (l: LaunchRecord, el: HTMLElement) => {
-    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
-    setHoverTarget({ kind: "launch", mint: l.mint, rect: el.getBoundingClientRect() });
-    if (onRefreshLaunch && lastRefreshRef.current !== l.mint) {
-      lastRefreshRef.current = l.mint;
-      onRefreshLaunch(l.mint);
-    }
   };
 
   const hideHover = () => {
@@ -304,18 +296,13 @@ export default function NarraDashboard({
 
   const resolvedHover = useMemo(() => {
     if (!hoverTarget) return null;
-    if (hoverTarget.kind === "launch") {
-      const l = launches.find((x) => x.mint === hoverTarget.mint);
-      if (!l) return null;
-      return { kind: "launch" as const, l, rect: hoverTarget.rect };
-    }
     const pool = metas
       ? [...(metas.emerging ?? []), ...metas.forming, ...metas.active]
       : [];
     const m = pool.find((x) => x.id === hoverTarget.id);
     if (!m) return null;
     return { kind: "meta" as const, m, rect: hoverTarget.rect };
-  }, [hoverTarget, launches, metas]);
+  }, [hoverTarget, metas]);
 
   const allMetasForHeat = useMemo(
     () => metas ? [...(metas.emerging ?? []), ...metas.forming, ...metas.active] : [],
@@ -431,19 +418,19 @@ export default function NarraDashboard({
       }
     }
 
-    // Keep the strongest setups, then show newest → oldest so the feed reads chronologically.
+    // Newest activity first — score only gates inclusion, does not reshuffle every tick.
     const quality = events
-      .filter((e) => e.tier >= 1 || e.opportunityScore >= 5)
+      .filter((e) => {
+        if (e.isLaunch) return e.tier >= 1 || e.opportunityScore >= 3;
+        return e.tier >= 1 || e.opportunityScore >= 4;
+      })
       .sort((a, b) => {
-        if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
-        return b.at - a.at;
+        if (b.at !== a.at) return b.at - a.at;
+        return b.opportunityScore - a.opportunityScore;
       })
       .slice(0, 80);
 
-    return [...quality].sort((a, b) => {
-      if (b.at !== a.at) return b.at - a.at;
-      return b.opportunityScore - a.opportunityScore;
-    });
+    return quality;
   }, [launches, metas]);
 
   const opportunityFeed = timelineEvents;
@@ -568,6 +555,20 @@ export default function NarraDashboard({
                 ? `${launches.length} creates · ${metas.activeMetaCount} active · ${metas.formingCount} forming · ${capitalize(metas.dominantStage)}`
                 : "—"}
             </div>
+            {auth.user ? (
+              <button
+                type="button"
+                className="radar-account"
+                onClick={() => setAccountOpen(true)}
+                title={auth.wallet?.address}
+              >
+                @{auth.user.username}
+              </button>
+            ) : (
+              <button type="button" className="radar-account radar-account--cta" onClick={() => setAccountOpen(true)}>
+                Create account
+              </button>
+            )}
           </div>
         </div>
       </nav>
@@ -766,7 +767,7 @@ export default function NarraDashboard({
 
             <BetttrCard accent="launch">
               <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
-              <p className="panel-hint">Live creates — hover for stats</p>
+              <p className="panel-hint">Live creates from Geyser</p>
               <div className="card-scroll">
                 {!visibleLaunches.length ? (
                   <p className="empty">Waiting for CreateV2 stream…</p>
@@ -774,13 +775,8 @@ export default function NarraDashboard({
                   <AnimatedFeed
                     className="animated-feed"
                     items={launchFeedItems}
-                    renderItem={(l) => (
-                      <LaunchRow
-                        l={l}
-                        onHover={showLaunchHover}
-                        onHoverEnd={hideHover}
-                      />
-                    )}
+                    animateReorder={false}
+                    renderItem={(l) => <LaunchRow l={l} />}
                   />
                 )}
               </div>
@@ -789,19 +785,12 @@ export default function NarraDashboard({
         </main>
         </HoverOverlay>
       </div>
+      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} auth={auth} />
     </div>
   );
 }
 
-function LaunchRow({
-  l,
-  onHover,
-  onHoverEnd,
-}: {
-  l: LaunchRecord;
-  onHover: (l: LaunchRecord, el: HTMLElement) => void;
-  onHoverEnd: () => void;
-}) {
+function LaunchRow({ l }: { l: LaunchRecord }) {
   const { label, sub, pending } = getLaunchDisplay(l);
   const prevRef = useRef<Partial<LaunchRecord>>({});
   const prev = prevRef.current;
@@ -817,11 +806,7 @@ function LaunchRow({
   };
 
   return (
-    <div
-      className={`launch-row ${pending ? "launch-row--pending" : ""}`}
-      onMouseEnter={(e) => onHover(l, e.currentTarget)}
-      onMouseLeave={onHoverEnd}
-    >
+    <div className={`launch-row ${pending ? "launch-row--pending" : ""}`}>
       <TokenImage src={l.image} size={30} priority />
       <div className="launch-meta">
         <div className="sym">

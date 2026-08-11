@@ -16,10 +16,13 @@ export function AnimatedFeed<T extends FeedItem>({
   items,
   className = "",
   renderItem,
+  animateReorder = true,
 }: {
   items: T[];
   className?: string;
   renderItem: (item: T) => ReactNode;
+  /** When false, only play enter animation — never FLIP-slide existing rows. */
+  animateReorder?: boolean;
 }) {
   const listRef = useRef<HTMLDivElement>(null);
   const posRef = useRef<Map<string, DOMRect>>(new Map());
@@ -86,7 +89,7 @@ export function AnimatedFeed<T extends FeedItem>({
       nextPos.set(id, rect);
 
       // Only FLIP when rank order changed — ignore height/content shifts.
-      if (!orderChanged || fresh.has(id)) continue;
+      if (!animateReorder || !orderChanged || fresh.has(id)) continue;
 
       const prev = posRef.current.get(id);
       if (!prev) continue;
@@ -108,7 +111,7 @@ export function AnimatedFeed<T extends FeedItem>({
     }
 
     posRef.current = nextPos;
-  }, [orderKey, items]);
+  }, [orderKey, items, animateReorder]);
 
   return (
     <div ref={listRef} className={className}>
