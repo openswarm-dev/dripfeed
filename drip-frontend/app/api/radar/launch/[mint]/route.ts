@@ -9,7 +9,7 @@ export async function GET(
   ctx: { params: Promise<{ mint: string }> },
 ) {
   const { mint } = await ctx.params;
-  if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(mint)) {
+  if (!mint || !/^[1-9A-HJ-NP-Za-km-z]{32,48}$/.test(mint)) {
     return NextResponse.json({ error: "invalid mint" }, { status: 400 });
   }
 

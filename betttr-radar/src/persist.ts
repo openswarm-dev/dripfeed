@@ -14,13 +14,14 @@ export interface PersistedState {
 const DATA_DIR = process.env.RADAR_DATA_DIR?.trim() || path.join(process.cwd(), 'data');
 const STATE_FILE = path.join(DATA_DIR, 'live-state.json');
 
-const DEBOUNCE_MS = 2_000;
-const MAX_WAIT_MS = 10_000;
+const DEBOUNCE_MS = 3_000;
+const MAX_WAIT_MS = 15_000;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let dirtySince = 0;
 let pending: PersistedState | null = null;
 let dbEnabled = false;
+let dbSaving = false;
 
 export async function initPersist(): Promise<void> {
   dbEnabled = await ensureRadarSchema();
@@ -39,7 +40,6 @@ function loadFromFile(): PersistedState | null {
 }
 
 export function loadPersistedState(): PersistedState | null {
-  // Sync path used at boot — file first; async PG hydrate runs via hydrateFromDb().
   const file = loadFromFile();
   if (file) return file;
   console.log(`[persist] no existing state at ${STATE_FILE}`);
@@ -95,16 +95,15 @@ function saveToFile(payload: PersistedState) {
 }
 
 async function saveToDb(payload: PersistedState) {
-  if (!dbEnabled) return;
+  if (!dbEnabled || dbSaving) return;
   const pool = getPool();
   if (!pool) return;
-  const client = await pool.connect();
+  dbSaving = true;
   try {
-    await client.query('BEGIN');
-    // Upsert launches in chunks
-    const launches = payload.launches.slice(0, 5000);
-    for (let i = 0; i < launches.length; i += 100) {
-      const chunk = launches.slice(i, i + 100);
+    // Upsert newest launches only (keep writes light over the public proxy).
+    const launches = payload.launches.slice(0, 800);
+    for (let i = 0; i < launches.length; i += 50) {
+      const chunk = launches.slice(i, i + 50);
       const values: unknown[] = [];
       const placeholders: string[] = [];
       chunk.forEach((l, idx) => {
@@ -112,7 +111,7 @@ async function saveToDb(payload: PersistedState) {
         placeholders.push(`($${o + 1}, $${o + 2}::jsonb, $${o + 3})`);
         values.push(l.mint, JSON.stringify(l), l.blockTime ?? null);
       });
-      await client.query(
+      await pool.query(
         `INSERT INTO radar_launches (mint, data, block_time)
          VALUES ${placeholders.join(',')}
          ON CONFLICT (mint) DO UPDATE SET
@@ -123,7 +122,7 @@ async function saveToDb(payload: PersistedState) {
       );
     }
 
-    const sparks = payload.sparks.slice(0, 200);
+    const sparks = payload.sparks.slice(0, 100);
     if (sparks.length) {
       const values: unknown[] = [];
       const placeholders: string[] = [];
@@ -132,7 +131,7 @@ async function saveToDb(payload: PersistedState) {
         placeholders.push(`($${o + 1}, $${o + 2}::jsonb, $${o + 3})`);
         values.push(s.id, JSON.stringify(s), s.receivedAt ?? null);
       });
-      await client.query(
+      await pool.query(
         `INSERT INTO radar_sparks (id, data, received_at)
          VALUES ${placeholders.join(',')}
          ON CONFLICT (id) DO UPDATE SET
@@ -143,26 +142,16 @@ async function saveToDb(payload: PersistedState) {
       );
     }
 
-    await client.query(
+    await pool.query(
       `INSERT INTO radar_kv (key, value, updated_at)
        VALUES ('live_meta', $1::jsonb, NOW())
        ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
       [JSON.stringify({ liveLaunches: payload.liveLaunches, savedAt: payload.savedAt })],
     );
-
-    // Prune stale rows beyond keep window
-    await client.query(
-      `DELETE FROM radar_launches
-       WHERE mint NOT IN (
-         SELECT mint FROM radar_launches ORDER BY block_time DESC NULLS LAST LIMIT 5000
-       )`,
-    );
-    await client.query('COMMIT');
   } catch (err) {
-    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
     console.warn('[persist] postgres save failed:', (err as Error).message);
   } finally {
-    client.release();
+    dbSaving = false;
   }
 }
 
@@ -173,7 +162,9 @@ function flush() {
   const payload = pending;
   pending = null;
   saveToFile(payload);
-  void saveToDb(payload);
+  void saveToDb(payload).catch((err) => {
+    console.warn('[persist] postgres save rejected:', (err as Error).message);
+  });
 }
 
 /** Debounced persist with a max wait so continuous live updates still flush. */

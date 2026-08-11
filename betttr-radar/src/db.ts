@@ -27,9 +27,10 @@ export function getPool(): pg.Pool | null {
       ssl: url.includes('localhost') || url.includes('127.0.0.1')
         ? false
         : { rejectUnauthorized: false },
-      max: 4,
-      idleTimeoutMillis: 30_000,
-      connectionTimeoutMillis: 12_000,
+      max: 2,
+      idleTimeoutMillis: 20_000,
+      connectionTimeoutMillis: 20_000,
+      allowExitOnIdle: true,
     });
     pool.on('error', (err) => {
       console.warn('[db] pool error:', err.message);

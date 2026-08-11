@@ -104,6 +104,13 @@ function buildStreamInitPayload() {
 validateConfig();
 setTweetStreamAccounts(config.tweetstreamAccounts);
 
+process.on('unhandledRejection', (err) => {
+  console.warn('[radar] unhandledRejection:', (err as Error)?.message ?? err);
+});
+process.on('uncaughtException', (err) => {
+  console.warn('[radar] uncaughtException:', err?.message ?? err);
+});
+
 async function enrichStaleLaunches() {
   const now = Math.floor(Date.now() / 1000);
   const pending = getState().launches
@@ -160,7 +167,7 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  const launchMatch = url.match(/^\/api\/launch\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+  const launchMatch = url.match(/^\/api\/launch\/([1-9A-HJ-NP-Za-km-z]{32,48})$/);
   if (launchMatch) {
     const mint = launchMatch[1]!;
     void (async () => {
