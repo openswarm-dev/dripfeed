@@ -269,13 +269,35 @@ export function addLaunch(launch: LaunchRecord) {
   persistCurrent();
 }
 
-export function updateLaunch(launch: LaunchRecord) {
+export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
   const current = getState();
   const idx = current.launches.findIndex((l) => l.mint === launch.mint);
   if (idx < 0) return;
 
   const launches = [...current.launches];
   launches[idx] = mergeLaunchRecord(launches[idx]!, launch);
+
+  // Soft path: patch launch + light broadcast without full meta recompute.
+  // Used for progressive enrich so geyser isn't starved at 100% CPU.
+  if (opts?.soft && state) {
+    state = {
+      ...state,
+      launches,
+      feeds: {
+        geyser: geyserConnected,
+        tweetstream: tweetstreamConnected,
+        tweetstreamAccounts: state.feeds.tweetstreamAccounts,
+      },
+    };
+    broadcast('launch', {
+      launch: launches[idx],
+      launches: state.launches.slice(0, 200),
+      geyserStats: { ...geyserStats },
+      liveLaunches: state.liveLaunches,
+    });
+    return;
+  }
+
   state = buildState(launches, current.sparks, current.liveLaunches);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;

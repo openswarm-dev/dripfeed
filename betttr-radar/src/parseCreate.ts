@@ -368,27 +368,51 @@ export function parsePumpCreateGeyser(transactionUpdate: any): Omit<ParsedLaunch
   if (!txInfo) return null;
 
   const parsed =
-    parseEncodedGeyserTx(txInfo) ?? parseRawGeyserTx(transactionUpdate);
+    parseRawGeyserTx(transactionUpdate) ?? parseEncodedGeyserTx(txInfo);
   if (!parsed) return null;
 
-  // Prefer log markers, but also detect Create/CreateV2 via instruction discriminators.
-  // Some geyser providers omit or truncate logMessages — without this we silently drop creates.
-  const createKind = findCreateKindFromTx(txInfo);
   const logsSayCreate = isPumpCreate(parsed.logs);
-  if (!logsSayCreate && !createKind) return null;
+  // Fast-path: most pump txs are buys/sells. Never run expensive disc decode on those.
+  if (!logsSayCreate) {
+    const looksLikeTrade = parsed.logs.some(
+      (l) =>
+        l.includes('Instruction: Buy')
+        || l.includes('Instruction: Sell')
+        || l.includes('Instruction: GetFees')
+        || l.includes('BuyProfile'),
+    );
+    if (looksLikeTrade) return null;
+
+    // Only fall back to discriminator scan when logs are missing/truncated.
+    if (parsed.logs.length > 0) return null;
+    const createKind = findCreateKindFromTx(txInfo);
+    if (!createKind) return null;
+
+    const mint = extractMint(parsed.keys, parsed.creator);
+    if (!mint) return null;
+    const meta = parsePumpMetadataFromTx(txInfo);
+    return {
+      signature: parsed.signature,
+      slot,
+      mint,
+      creator: parsed.creator,
+      isCreateV2: createKind === 'v2',
+      name: meta.name,
+      symbol: meta.symbol,
+      metadataUri: meta.metadataUri,
+    };
+  }
 
   const mint = extractMint(parsed.keys, parsed.creator);
   if (!mint) return null;
 
   const meta = parsePumpMetadataFromTx(txInfo);
-  const isV2 = createKind === 'v2' || isCreateV2(parsed.logs);
-
   return {
     signature: parsed.signature,
     slot,
     mint,
     creator: parsed.creator,
-    isCreateV2: isV2,
+    isCreateV2: isCreateV2(parsed.logs),
     name: meta.name,
     symbol: meta.symbol,
     metadataUri: meta.metadataUri,

@@ -155,7 +155,7 @@ export async function startGeyserFeed() {
         );
 
         void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
-          updateLaunch(partial);
+          updateLaunch(partial, { soft: true });
         }).then((enriched) => {
           updateLaunch(enriched);
         }).catch(() => {});
