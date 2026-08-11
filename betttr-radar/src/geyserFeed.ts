@@ -121,7 +121,14 @@ export async function startGeyserFeed() {
 
       stream.on('error', (err: Error) => {
         setGeyserConnected(false);
-        console.error('Geyser stream error:', err.message);
+        const msg = err.message;
+        if (msg.includes('PERMISSION_DENIED')) {
+          console.error('Geyser stream error:', msg, '— Helius LaserStream requires a paid plan, or use ERPC with IP whitelist');
+        } else if (msg.includes('ETIMEDOUT') || msg.includes('UNAVAILABLE')) {
+          console.error('Geyser stream error:', msg, '— whitelist Railway egress IP in ERPC dashboard');
+        } else {
+          console.error('Geyser stream error:', msg);
+        }
       });
 
       await new Promise<void>((resolve) => stream.on('close', resolve));

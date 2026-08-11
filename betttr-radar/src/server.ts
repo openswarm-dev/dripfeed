@@ -14,6 +14,7 @@ import {
   refreshLaunchVolumes,
 } from './liveStore.js';
 import { startGeyserFeed } from './geyserFeed.js';
+import { startRpcPollFeed } from './rpcPollFeed.js';
 import {
   startTweetStreamFeed,
   setupTweetStreamAccounts,
@@ -23,6 +24,19 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
 const HOST = process.env.HOST || '0.0.0.0';
+
+async function logOutboundIp() {
+  if (!process.env.RAILWAY_ENVIRONMENT) return;
+  try {
+    const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
+    const data = await res.json() as { ip?: string };
+    if (data.ip) {
+      console.log(`  Railway egress IP: ${data.ip} — whitelist in ERPC dashboard for Geyser gRPC`);
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -162,11 +176,21 @@ server.listen(config.port, HOST, async () => {
     console.log('  TweetStream off — set TWEETSTREAM_API_KEY\n');
   }
 
-  if (config.geyserEnabled) {
+  void logOutboundIp();
+
+  if (config.rpcPollFallback) {
+    startRpcPollFeed().catch((err) => {
+      console.error('RPC poll feed failed:', err?.message ?? err);
+    });
+  }
+
+  if (config.geyserEnabled && !config.rpcPollFallback) {
     startGeyserFeed().catch((err) => {
       console.error('Geyser feed failed:', err?.message ?? err);
     });
-  } else {
+  } else if (config.geyserEnabled && config.rpcPollFallback) {
+    console.log('  Geyser gRPC skipped on Railway — using RPC poll (set GEYSER_RPC_POLL=false + whitelist IP for gRPC)\n');
+  } else if (!config.rpcPollFallback) {
     console.log('  Geyser off — set BETTTR_GEYSER=true or NARRA_GEYSER=true\n');
   }
 });

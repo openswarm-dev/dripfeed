@@ -26,13 +26,14 @@ function parseAccountList(raw: string | undefined): string[] {
 }
 
 function resolveGeyserEndpoint(): string {
-  const explicit = process.env.GEYSER_ENDPOINT?.trim();
-  if (explicit) return explicit;
-  // Railway / cloud: ERPC burst needs IP whitelist — use Helius LaserStream with API key instead
-  if (process.env.RAILWAY_ENVIRONMENT || process.env.HELIUS_API_KEY) {
+  const provider = process.env.GEYSER_PROVIDER?.trim().toLowerCase();
+  if (provider === 'helius') {
     return process.env.HELIUS_GEYSER_ENDPOINT?.trim()
+      || process.env.GEYSER_ENDPOINT?.trim()
       || 'https://laserstream-mainnet-fra.helius-rpc.com';
   }
+  const explicit = process.env.GEYSER_ENDPOINT?.trim();
+  if (explicit) return explicit;
   return 'http://grpc-fra1-burst.erpc.global';
 }
 
@@ -63,6 +64,10 @@ export const config = {
     10,
   ),
   geyserEnabled: process.env.BETTTR_GEYSER === 'true' || process.env.NARRA_GEYSER === 'true' || process.env.GEYSER_ENABLED === 'true',
+  /** Poll pump.fun creates over HTTP RPC when gRPC Geyser is blocked (Railway egress, etc.). */
+  rpcPollFallback:
+    process.env.GEYSER_RPC_POLL === 'true'
+    || (process.env.RAILWAY_ENVIRONMENT === 'production' && process.env.GEYSER_RPC_POLL !== 'false'),
   tweetstreamApiKey: process.env.TWEETSTREAM_API_KEY?.trim() || '',
   tweetstreamWsUrl: process.env.TWEETSTREAM_WS_URL?.trim() || 'wss://ws-global.tweetstream.io/ws',
   tweetstreamAccounts: parseAccountList(process.env.TWEETSTREAM_ACCOUNTS),
