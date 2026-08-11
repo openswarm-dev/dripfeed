@@ -241,8 +241,22 @@ export async function startGeyserFeed() {
             for (const m of drop) seen.delete(m);
           }
 
-          const blockTime = Math.floor(Date.now() / 1000);
-          const launch = minimalLaunch({ ...parsed, blockTime });
+          const slot = Number(txWrap?.slot ?? parsed.slot ?? 0);
+          const rawBt =
+            txWrap?.blockTime
+            ?? txWrap?.block_time
+            ?? txWrap?.transaction?.blockTime
+            ?? txWrap?.transaction?.block_time
+            ?? null;
+          let blockTime = Math.floor(Date.now() / 1000);
+          if (typeof rawBt === 'number' && Number.isFinite(rawBt) && rawBt > 1_000_000_000) {
+            blockTime = rawBt > 1e12 ? Math.floor(rawBt / 1000) : Math.floor(rawBt);
+          }
+          const launch = minimalLaunch({
+            ...parsed,
+            slot: Number.isFinite(slot) ? slot : parsed.slot,
+            blockTime,
+          });
           // Skip if store already has it (gap-fill may have landed first).
           if (getState().launches.some((l) => l.mint === parsed.mint)) {
             void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {

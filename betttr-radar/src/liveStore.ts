@@ -55,9 +55,31 @@ function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): Laun
     const prev = byMint.get(l.mint);
     byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
-  return [...byMint.values()]
-    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    .slice(0, 5000);
+  return sortLaunchesByTime([...byMint.values()]).slice(0, 5000);
+}
+
+/** Newest create first — blockTime, then slot as tiebreaker. */
+function sortLaunchesByTime(launches: LaunchRecord[]): LaunchRecord[] {
+  return [...launches].sort((a, b) => {
+    const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
+    if (bt !== 0) return bt;
+    return (b.slot ?? 0) - (a.slot ?? 0);
+  });
+}
+
+/** Insert keeping newest-first order before any persist/broadcast. */
+function insertLaunchSorted(launches: LaunchRecord[], launch: LaunchRecord): LaunchRecord[] {
+  const t = launch.blockTime ?? 0;
+  const slot = launch.slot ?? 0;
+  let i = 0;
+  while (i < launches.length) {
+    const cur = launches[i]!;
+    const ct = cur.blockTime ?? 0;
+    if (t > ct) break;
+    if (t === ct && slot > (cur.slot ?? 0)) break;
+    i += 1;
+  }
+  return [...launches.slice(0, i), launch, ...launches.slice(i)].slice(0, 5000);
 }
 
 /** Prefer newer fields, but never let empty/zero polls wipe known-good metrics. */
@@ -68,9 +90,19 @@ function keepMetric(next: number | undefined, prev: number | undefined): number 
 }
 
 function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
+  // Create time: keep the earliest known timestamp (pump list / chain), never
+  // let a late geyser Date.now() jump the token to the top of the feed.
+  let blockTime = prev.blockTime ?? next.blockTime ?? null;
+  if (prev.blockTime != null && next.blockTime != null) {
+    blockTime = Math.min(prev.blockTime, next.blockTime);
+  }
+  const slot = Math.max(prev.slot ?? 0, next.slot ?? 0);
+
   return {
     ...prev,
     ...next,
+    blockTime,
+    slot,
     name: next.name ?? prev.name,
     symbol: next.symbol ?? prev.symbol,
     image: next.image ?? prev.image,
@@ -89,7 +121,8 @@ function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord
 
 function persistCurrent() {
   if (!state) return;
-  schedulePersist(state.launches, state.sparks, state.liveLaunches);
+  // Always persist in canonical time order so DB ORDER BY matches the live feed.
+  schedulePersist(sortLaunchesByTime(state.launches), state.sparks, state.liveLaunches);
 }
 
 function hasLaunchLabel(l: LaunchRecord): boolean {
@@ -249,7 +282,7 @@ export function addLaunch(launch: LaunchRecord) {
   if (current.launches.some((l) => l.mint === launch.mint)) return;
 
   recordCreateStored();
-  const launches = [launch, ...current.launches].slice(0, 5000);
+  const launches = insertLaunchSorted(current.launches, launch);
 
   // Soft path: push to UI immediately — never run analyzeMetas on the hot create path.
   if (state) {
@@ -311,8 +344,19 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
   const idx = current.launches.findIndex((l) => l.mint === launch.mint);
   if (idx < 0) return;
 
-  const launches = [...current.launches];
-  launches[idx] = mergeLaunchRecord(launches[idx]!, launch);
+  const merged = mergeLaunchRecord(current.launches[idx]!, launch);
+  const timeChanged =
+    merged.blockTime !== current.launches[idx]!.blockTime
+    || merged.slot !== current.launches[idx]!.slot;
+
+  let launches: LaunchRecord[];
+  if (timeChanged) {
+    const without = current.launches.filter((l) => l.mint !== launch.mint);
+    launches = insertLaunchSorted(without, merged);
+  } else {
+    launches = [...current.launches];
+    launches[idx] = merged;
+  }
 
   // Soft path: patch launch + light broadcast without full meta recompute.
   // Used for progressive enrich so geyser isn't starved at 100% CPU.
@@ -328,7 +372,7 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
     };
     // Only send the patched launch — never re-serialize the whole feed on every enrich tick.
     broadcast('launch', {
-      launch: launches[idx],
+      launch: merged,
       geyserStats: { ...geyserStats },
       liveLaunches: state.liveLaunches,
     });
@@ -401,11 +445,15 @@ export async function syncRecentPumpCreates() {
 
     const current = getState();
     const known = new Set(current.launches.map((l) => l.mint));
-    let added = 0;
 
-    // Newest-first; yield between adds so each create flushes its own SSE event
-    // instead of dumping a batch into one TCP/React tick.
-    for (const coin of recent) {
+    // Stage unknowns, sort by create time, then insert — so order is correct
+    // in memory (and DB) before any SSE/persist, not "arrival order".
+    const fresh = recent
+      .filter((coin) => !known.has(coin.mint))
+      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); // oldest → newest
+
+    let added = 0;
+    for (const coin of fresh) {
       if (known.has(coin.mint)) continue;
       known.add(coin.mint);
 

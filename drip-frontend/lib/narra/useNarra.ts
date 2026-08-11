@@ -97,9 +97,17 @@ function keepMetric(next: number | undefined, prev: number | undefined): number 
 }
 
 function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
+  let blockTime = prev.blockTime ?? next.blockTime ?? null;
+  if (prev.blockTime != null && next.blockTime != null) {
+    blockTime = Math.min(prev.blockTime, next.blockTime);
+  }
+  const slot = Math.max(prev.slot ?? 0, next.slot ?? 0);
+
   return {
     ...prev,
     ...next,
+    blockTime,
+    slot,
     name: next.name ?? prev.name,
     symbol: next.symbol ?? prev.symbol,
     image: next.image ?? prev.image,
@@ -120,31 +128,23 @@ function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[])
   const byMint = new Map<string, LaunchRecord>();
   for (const l of existing) byMint.set(l.mint, l);
 
-  const fresh: string[] = [];
   for (const l of incoming) {
     const prev = byMint.get(l.mint);
     if (prev) {
       byMint.set(l.mint, mergeLaunchRecord(prev, l));
     } else {
       byMint.set(l.mint, l);
-      fresh.push(l.mint);
     }
   }
 
-  const seen = new Set<string>();
-  const ordered: LaunchRecord[] = [];
-  for (const mint of [...fresh.reverse(), ...existing.map((l) => l.mint)]) {
-    if (seen.has(mint)) continue;
-    const row = byMint.get(mint);
-    if (!row) continue;
-    seen.add(mint);
-    ordered.push(row);
-  }
-  for (const [mint, row] of byMint) {
-    if (seen.has(mint)) continue;
-    ordered.push(row);
-  }
-  return ordered.slice(0, 5000);
+  // Always order by create time — never by SSE arrival / report merge order.
+  return [...byMint.values()]
+    .sort((a, b) => {
+      const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
+      if (bt !== 0) return bt;
+      return (b.slot ?? 0) - (a.slot ?? 0);
+    })
+    .slice(0, 5000);
 }
 
 function mergeMetas(prev: MetaDashboard | null, next: MetaDashboard | null | undefined): MetaDashboard | null {

@@ -116,7 +116,11 @@ async function saveToDb(payload: PersistedState) {
          VALUES ${placeholders.join(',')}
          ON CONFLICT (mint) DO UPDATE SET
            data = EXCLUDED.data,
-           block_time = EXCLUDED.block_time,
+           block_time = CASE
+             WHEN radar_launches.block_time IS NULL THEN EXCLUDED.block_time
+             WHEN EXCLUDED.block_time IS NULL THEN radar_launches.block_time
+             ELSE LEAST(radar_launches.block_time, EXCLUDED.block_time)
+           END,
            updated_at = NOW()`,
         values,
       );
