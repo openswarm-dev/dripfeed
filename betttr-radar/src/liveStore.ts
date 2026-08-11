@@ -446,11 +446,12 @@ export async function syncRecentPumpCreates() {
     const current = getState();
     const known = new Set(current.launches.map((l) => l.mint));
 
-    // Stage unknowns, sort by create time, then insert — so order is correct
-    // in memory (and DB) before any SSE/persist, not "arrival order".
+    // Newest first so the feed top updates immediately; insertLaunchSorted
+    // still places each row by create time.
     const fresh = recent
       .filter((coin) => !known.has(coin.mint))
-      .sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); // oldest → newest
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      .slice(0, 20); // never dump 40+ in one lock — next tick picks up the rest
 
     let added = 0;
     for (const coin of fresh) {
@@ -479,9 +480,8 @@ export async function syncRecentPumpCreates() {
         narrativeScore: cls.narrativeScore,
       });
       added += 1;
-      // Space SSE writes so the proxy/client can paint one create at a time
-      // instead of coalescing a whole gap-fill into one frame.
-      await new Promise((r) => setTimeout(r, 40));
+      // Yield only — client rAF unbatches paints. Long delays froze sync.
+      await new Promise((r) => setImmediate(r));
     }
 
     if (added) {

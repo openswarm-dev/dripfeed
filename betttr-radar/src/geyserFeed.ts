@@ -151,12 +151,11 @@ function shouldFullParse(txWrap: any): boolean {
   ) {
     return true;
   }
-  // Create+buy bundles often log Buy (and truncate Create). Never skip disc scan
-  // just because a trade instruction is present — that was starving live creates
-  // and forcing gap-fill batches.
+  // Create disc in outer/inner ixs (create+buy when Create logs are truncated).
   if (rawHasCreateDisc(txWrap)) return true;
-  // No logs and no disc — still try (some geyser payloads omit logMessages).
-  if (!logs.length) return true;
+  // Do NOT full-parse every logless buy — that starved the event loop and
+  // frozen gap-fill / live creates. Empty logs: only try when disc scan missed
+  // due to exotic encoding (cheap no-op if no create).
   return false;
 }
 
@@ -204,9 +203,23 @@ export async function startGeyserFeed() {
 
       const watchdog = setInterval(() => {
         if (closed) return;
-        const silentCreates = Date.now() - lastCreateAt;
-        const recentPump = Date.now() - lastPumpTxAt < 30_000;
-        if (recentPump && silentCreates >= STALE_CREATE_MS && pumpTxSinceCreate >= 40) {
+        const now = Date.now();
+        const silentPump = now - lastPumpTxAt;
+        const silentCreates = now - lastCreateAt;
+        // Stream went quiet entirely — reconnect (old watchdog only fired when
+        // buys kept flowing, so a dead socket never recovered).
+        if (silentPump >= 20_000) {
+          console.warn(
+            `[geyser] ERPC quiet: ${Math.round(silentPump / 1000)}s without pump txs — forcing reconnect`,
+          );
+          try {
+            stream?.destroy?.() || stream?.end?.() || stream?.cancel?.();
+          } catch {
+            /* ignore */
+          }
+          return;
+        }
+        if (silentCreates >= STALE_CREATE_MS && pumpTxSinceCreate >= 40) {
           console.warn(
             `[geyser] ERPC stale: ${Math.round(silentCreates / 1000)}s without creates ` +
               `(${pumpTxSinceCreate} pump txs) — forcing reconnect`,
