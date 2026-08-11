@@ -275,7 +275,7 @@ export async function handleWalletApi(
         json(res, 401, { error: 'Invalid export password' });
         return true;
       }
-      const wallet = await getWalletForUser(auth.userId);
+      const wallet = await cachedWallet(auth.userId);
       if (!wallet) {
         json(res, 404, { error: 'No wallet' });
         return true;
