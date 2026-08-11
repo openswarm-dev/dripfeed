@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import NarraDashboard from "@/components/narra/NarraDashboard";
-import Cursor from "@/components/Cursor";
 import { useNarra } from "@/lib/narra/useNarra";
 
 const T = { bg: "#111114" } as const;
@@ -72,7 +71,6 @@ export default function Page() {
 
   return (
     <div style={{ background: T.bg, minHeight: "100vh", color: "#F4F4F8" }}>
-      <Cursor />
       <AnimatePresence>
         {!introDone && (
           <CinematicIntro key="intro" onComplete={() => setIntroDone(true)} />

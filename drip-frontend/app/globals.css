@@ -5,7 +5,6 @@
 html {
   scroll-behavior: smooth;
   background: #111114;
-  cursor: none;
 }
 
 body {
@@ -17,11 +16,6 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
-  cursor: none;
-}
-
-@media (pointer: coarse) {
-  html, body { cursor: auto; }
 }
 
 /* Scrollbar */
