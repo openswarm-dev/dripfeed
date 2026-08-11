@@ -15,20 +15,46 @@ if (fs.existsSync(DEVSNIPER_ENV)) dotenv.config({ path: DEVSNIPER_ENV });
 
 export const PUMP_PROGRAM = '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P';
 
+/** Parse account list — Railway often strips commas from env vars. */
+function parseAccountList(raw: string | undefined): string[] {
+  const fallback = 'elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain';
+  return (raw || fallback)
+    .split(/[,;\s]+/)
+    .map((s) => s.trim().replace(/^@/, ''))
+    .filter(Boolean)
+    .slice(0, 5);
+}
+
+function resolveGeyserEndpoint(): string {
+  const explicit = process.env.GEYSER_ENDPOINT?.trim();
+  if (explicit) return explicit;
+  // Railway / cloud: ERPC burst needs IP whitelist — use Helius LaserStream with API key instead
+  if (process.env.RAILWAY_ENVIRONMENT || process.env.HELIUS_API_KEY) {
+    return process.env.HELIUS_GEYSER_ENDPOINT?.trim()
+      || 'https://laserstream-mainnet-fra.helius-rpc.com';
+  }
+  return 'http://grpc-fra1-burst.erpc.global';
+}
+
 /** ERPC gRPC often uses the same api-key as the HTTP RPC URL when X_TOKEN is unset. */
-function resolveGeyserToken(): string | undefined {
+function resolveGeyserToken(endpoint: string): string | undefined {
   const explicit = process.env.X_TOKEN?.trim();
   if (explicit) return explicit;
+  if (endpoint.includes('helius')) {
+    return process.env.HELIUS_API_KEY?.trim() || undefined;
+  }
   const rpc = process.env.SOLANA_RPC_URL?.trim() || '';
   const match = rpc.match(/[?&]api-key=([^&]+)/i);
   return match?.[1];
 }
 
+const geyserEndpoint = resolveGeyserEndpoint();
+
 export const config = {
   rpcUrl: process.env.SOLANA_RPC_URL?.trim() || '',
   heliusApiKey: process.env.HELIUS_API_KEY?.trim() || '',
-  geyserEndpoint: process.env.GEYSER_ENDPOINT?.trim() || 'http://grpc-fra1-burst.erpc.global',
-  geyserToken: resolveGeyserToken(),
+  geyserEndpoint,
+  geyserToken: resolveGeyserToken(geyserEndpoint),
   scanDays: parseInt(process.env.SCAN_DAYS || '3', 10),
   maxSignaturePages: parseInt(process.env.MAX_SIGNATURE_PAGES || '80', 10),
   enrichConcurrency: parseInt(process.env.ENRICH_CONCURRENCY || '8', 10),
@@ -39,11 +65,7 @@ export const config = {
   geyserEnabled: process.env.BETTTR_GEYSER === 'true' || process.env.NARRA_GEYSER === 'true' || process.env.GEYSER_ENABLED === 'true',
   tweetstreamApiKey: process.env.TWEETSTREAM_API_KEY?.trim() || '',
   tweetstreamWsUrl: process.env.TWEETSTREAM_WS_URL?.trim() || 'wss://ws-global.tweetstream.io/ws',
-  tweetstreamAccounts: (process.env.TWEETSTREAM_ACCOUNTS || 'elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain')
-    .split(',')
-    .map((s) => s.trim().replace(/^@/, ''))
-    .filter(Boolean)
-    .slice(0, 5),
+  tweetstreamAccounts: parseAccountList(process.env.TWEETSTREAM_ACCOUNTS),
   dataDir: path.join(ROOT, 'data'),
 };
 

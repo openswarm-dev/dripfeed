@@ -15,13 +15,29 @@ export async function setupTweetStreamAccounts(): Promise<void> {
   if (!config.tweetstreamApiKey || !config.tweetstreamAccounts.length) return;
 
   try {
+    const meRes = await fetch(`${API}/api/me`, {
+      headers: { Authorization: `Bearer ${config.tweetstreamApiKey}` },
+    });
+    const me = await meRes.json();
+    const tracked = new Set<string>(
+      (me?.trackedAccounts?.handles ?? []).map((h: string) => h.toLowerCase()),
+    );
+
+    const missing = config.tweetstreamAccounts.filter(
+      (a) => !tracked.has(a.toLowerCase()),
+    );
+    if (!missing.length) {
+      console.log('  TweetStream watchlist: all accounts already tracked');
+      return;
+    }
+
     const res = await fetch(`${API}/api/add-account`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${config.tweetstreamApiKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ accounts: config.tweetstreamAccounts }),
+      body: JSON.stringify({ accounts: missing }),
     });
     const data = await res.json();
     console.log('  TweetStream watchlist:', JSON.stringify(data?.results ?? data));
@@ -89,7 +105,9 @@ export function startTweetStreamFeed() {
     });
 
     ws.on('error', (err) => {
-      console.error('  TweetStream error:', err.message);
+      if (!err.message.includes('429')) {
+        console.error('  TweetStream error:', err.message);
+      }
     });
   };
 
