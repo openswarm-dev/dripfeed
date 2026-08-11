@@ -43,6 +43,7 @@ else
   cp -a "$INSTALL_DIR/repo/betttr-radar/." "$INSTALL_DIR/"
   rm -rf "$INSTALL_DIR/repo"
 fi
+chown -R "$SERVICE_USER:$SERVICE_USER" "$INSTALL_DIR"
 
 echo "==> npm install"
 cd "$INSTALL_DIR"

@@ -6,8 +6,8 @@
   --radar-el: rgba(255, 255, 255, 0.05);
   --radar-border: rgba(255, 255, 255, 0.09);
   --radar-fg: #f4f4f8;
-  --radar-subtle: #8888a0;
-  --radar-faint: #44445a;
+  --radar-subtle: #b8b8d0;
+  --radar-faint: #9090b0;
   --radar-accent: #e8e8ff;
   --radar-warn: #ffb86c;
   --radar-cyan: #c8f0ff;
@@ -319,7 +319,7 @@
 }
 
 .betttr-panel-title {
-  color: var(--radar-faint) !important;
+  color: var(--radar-subtle) !important;
   margin: 0;
 }
 
@@ -428,7 +428,8 @@
 .stage-badge .name {
   font-size: 12px;
   font-weight: 600;
-  color: var(--radar-subtle);
+  color: var(--radar-fg);
+  opacity: 0.9;
 }
 
 /* ── Stage pipeline ── */
@@ -451,7 +452,7 @@
   border-radius: 10px;
   border: 1px solid var(--radar-border);
   background: var(--radar-el);
-  opacity: 0.45;
+  opacity: 0.72;
   transition: opacity 0.2s, border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -466,7 +467,7 @@
 .stage-step .step-num {
   font-size: 10px;
   font-family: var(--radar-mono);
-  color: var(--radar-faint);
+  color: var(--radar-subtle);
 }
 
 .stage-step .step-name {
@@ -474,11 +475,13 @@
   font-weight: 700;
   text-align: center;
   line-height: 1.2;
-  color: var(--radar-subtle);
+  color: var(--radar-fg);
+  opacity: 0.82;
 }
 
 .stage-step.current .step-name {
   color: var(--radar-fg);
+  opacity: 1;
 }
 
 /* ── List items ── */
