@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { MetaTrack, LaunchRecord } from "@/lib/narra/types";
+import type { MetaStage, MetaTrack, LaunchRecord } from "@/lib/narra/types";
 import { fmtAge, fmtTime, formatCompact, capitalize, findMeta } from "@/lib/narra/format";
 import { BetttrCard, PanelTitle } from "@/components/ui/BetttrCard";
 
@@ -50,10 +50,30 @@ function DecayMeter({ m, compact }: { m: MetaTrack; compact?: boolean }) {
   );
 }
 
-function ImageStrip({ images, max = 6 }: { images?: string[]; max?: number }) {
+function metaMatchesStage(m: MetaTrack, stage: MetaStage, sparks: { text: string; terms?: string[] }[]): boolean {
+  if (m.stage === stage) return true;
+  if (stage !== "spark") return false;
+  const theme = m.theme.toLowerCase();
+  return sparks.some((s) => {
+    const text = s.text.toLowerCase();
+    if (text.includes(theme) || theme.includes(text.slice(0, 24))) return true;
+    return (s.terms ?? []).some((t) => theme.includes(t.toLowerCase()) || t.toLowerCase().includes(theme));
+  });
+}
+
+function sortMetasByStage(metas: MetaTrack[], stageFilter: MetaStage | null, sparks: { text: string; terms?: string[] }[]) {
+  if (!stageFilter) return metas;
+  return [...metas].sort((a, b) => {
+    const am = metaMatchesStage(a, stageFilter, sparks) ? 0 : 1;
+    const bm = metaMatchesStage(b, stageFilter, sparks) ? 0 : 1;
+    return am - bm;
+  });
+}
+
+function ImageStrip({ images, max = 6, compact }: { images?: string[]; max?: number; compact?: boolean }) {
   if (!images?.length) return null;
   return (
-    <div className="meta-images">
+    <div className={`meta-images ${compact ? "meta-images--compact" : ""}`}>
       {images.slice(0, max).map((url) => (
         // eslint-disable-next-line @next/next/no-img-element
         <img key={url} src={url} alt="" loading="lazy" className="meta-thumb" />
@@ -67,32 +87,40 @@ function MetaCard({
   m,
   selected,
   extraClass,
+  stageFilter,
+  sparks,
   onSelect,
 }: {
   m: MetaTrack;
   selected: boolean;
   extraClass?: string;
+  stageFilter?: MetaStage | null;
+  sparks?: { text: string; terms?: string[] }[];
   onSelect: (id: string) => void;
 }) {
+  const stageHit = stageFilter
+    ? metaMatchesStage(m, stageFilter, sparks ?? [])
+    : false;
+  const stageDimmed = !!stageFilter && !stageHit;
+
   return (
     <button
       type="button"
-      className={`meta-item ${extraClass ?? ""} ${selected ? "selected" : ""}`}
-      data-cursor-hover
+      className={`meta-item meta-item--compact ${extraClass ?? ""} ${selected ? "selected" : ""} ${stageHit ? "stage-hit" : ""} ${stageDimmed ? "stage-dimmed" : ""}`}
       onClick={() => onSelect(m.id)}
     >
-      <ImageStrip images={m.sampleImages} />
+      <ImageStrip images={m.sampleImages} max={4} compact />
       <div className="row1">
         <span className="theme">&quot;{m.theme}&quot;</span>
         <span className={`stage-pill ${STAGE_CLASS[m.stage] ?? ""}`}>{m.stageLabel}</span>
       </div>
-      <div className="row2 meta-timers">
+      <div className="row2 meta-stats-line">
+        <span><strong>{m.launchCount}</strong> tok</span>
+        <span>{m.velocityPerHour}/hr</span>
+        {m.totalVolumeUsd24h ? <span>${formatCompact(m.totalVolumeUsd24h)}</span> : null}
+        <span className="meta-stats-sep">·</span>
         <span className="age-tag">1st <strong data-ts={m.firstSeen}>{fmtAge(m.firstSeenAgoSec)}</strong></span>
         <span className="age-tag">last <strong data-ts={m.lastSeen}>{fmtAge(m.lastSeenAgoSec)}</strong></span>
-      </div>
-      <div className="row2">
-        <strong>{m.launchCount}</strong> tokens · {m.velocityPerHour}/hr
-        {m.totalVolumeUsd24h ? ` · $${formatCompact(m.totalVolumeUsd24h)} vol` : ""}
       </div>
       <DecayMeter m={m} compact />
       <div className="psych">{m.psychologyLabel}</div>
@@ -198,6 +226,7 @@ export default function NarraDashboard({
 }) {
   const [showLoader, setShowLoader] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
   const [appVisible, setAppVisible] = useState(false);
 
   const metas = state?.metas ?? null;
@@ -247,7 +276,14 @@ export default function NarraDashboard({
     ?? metas?.all[0]
     ?? null;
 
-  const formingClusters = metas ? [...(metas.emerging ?? []), ...metas.forming] : [];
+  const formingClusters = metas ? sortMetasByStage([...(metas.emerging ?? []), ...metas.forming], stageFilter, sparks) : [];
+  const activeMetas = metas ? sortMetasByStage(metas.active, stageFilter, sparks) : [];
+
+  const stageFilterCount = useMemo(() => {
+    if (!stageFilter || !metas) return 0;
+    const all = [...(metas.emerging ?? []), ...metas.forming, ...metas.active];
+    return all.filter((m) => metaMatchesStage(m, stageFilter, sparks)).length;
+  }, [stageFilter, metas, sparks]);
 
   const timelineEvents: Array<{
     at: number;
@@ -345,7 +381,7 @@ export default function NarraDashboard({
             {error}
             <br />
             <span>
-              Local: run <code>npm run dev</code> in <code>DEVSNIPER/narra</code> or <code>dripfeed/betttr-radar</code> · Railway: set <code>RADAR_API_URL</code>
+              Local: run <code>npm run dev</code> in <code>DEVSNIPER/narra</code> · Railway: set <code>RADAR_API_URL</code> on the frontend service
             </span>
           </div>
         )}
@@ -414,14 +450,28 @@ export default function NarraDashboard({
                   if (i < current) cls += " done";
                   else if (i === current) cls += " current";
                   else cls += " future";
+                  if (stageFilter === s.id) cls += " filter-on";
                   return (
-                    <div key={s.id} className={cls}>
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={cls}
+                      title={`Filter forming & active by ${s.label}`}
+                      onClick={() => setStageFilter((prev) => (prev === s.id ? null : s.id))}
+                    >
                       <div className="step-num">{i + 1}</div>
                       <div className="step-name">{s.label}</div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
+            )}
+            {stageFilter && (
+              <p className="stage-filter-hint">
+                Showing <strong>{stageFilterCount}</strong> at <strong>{capitalize(stageFilter)}</strong>
+                {" · "}
+                <button type="button" className="stage-filter-clear" onClick={() => setStageFilter(null)}>clear</button>
+              </p>
             )}
           </BetttrCard>
         </div>
@@ -459,6 +509,8 @@ export default function NarraDashboard({
                     m={m}
                     selected={selectedId === m.id}
                     extraClass={m.isEmerging ? "emerging" : "new-forming"}
+                    stageFilter={stageFilter}
+                    sparks={sparks}
                     onSelect={setSelectedId}
                   />
                 ))}
@@ -470,8 +522,15 @@ export default function NarraDashboard({
               <div className="card-scroll">
                 {!metas?.active.length ? (
                   <p className="empty">No active metas in the last 6 hours</p>
-                ) : metas.active.map((m) => (
-                  <MetaCard key={m.id} m={m} selected={selectedId === m.id} onSelect={setSelectedId} />
+                ) : activeMetas.map((m) => (
+                  <MetaCard
+                    key={m.id}
+                    m={m}
+                    selected={selectedId === m.id}
+                    stageFilter={stageFilter}
+                    sparks={sparks}
+                    onSelect={setSelectedId}
+                  />
                 ))}
               </div>
             </BetttrCard>
