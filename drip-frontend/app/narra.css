@@ -554,18 +554,15 @@
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--radar-fg);
+  color: #fff;
   border-radius: 7px;
-  border: 1px solid transparent;
-  background:
-    linear-gradient(rgba(17, 17, 20, 0.15), rgba(17, 17, 20, 0.15)) padding-box,
-    linear-gradient(90deg, #c8f0ff, #e8d8ff, #9ef0c8, #c8f0ff) border-box;
-  background-size: auto, 200% 100%;
-  animation: holo-flow 4s linear infinite;
+  border: 1px solid rgba(255, 255, 255, 0.75);
+  background: transparent;
   cursor: pointer;
 }
 .meta-deploy-btn:hover {
-  filter: brightness(1.15);
+  border-color: #fff;
+  background: rgba(255, 255, 255, 0.06);
 }
 .radar-pill--link {
   text-decoration: none;
