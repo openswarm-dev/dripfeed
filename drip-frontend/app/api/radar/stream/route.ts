@@ -16,6 +16,7 @@ export async function GET() {
       return NextResponse.json({ error: "Stream unavailable" }, { status: 503 });
     }
 
+    // Pass through bytes immediately — no transform/buffer that batches creates.
     return new NextResponse(upstream.body, {
       headers: {
         "Content-Type": "text/event-stream",

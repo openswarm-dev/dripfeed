@@ -173,6 +173,7 @@ export async function deployPumpToken(input: {
 }): Promise<{
   mint: string;
   signature: string;
+  createSignature: string;
   buySol: number;
   expectedTokensUi: number;
   supplyPct: number;
@@ -202,7 +203,9 @@ export async function deployPumpToken(input: {
     amount: solAmount,
   });
 
-  const ixs = await PUMP_SDK.createV2AndBuyInstructions({
+  // create+buy in one tx exceeds Solana's 1232-byte packet limit (often ~1264).
+  // Split: (1) createV2 + extendAccount  (2) ATA + buy
+  const allIxs = await PUMP_SDK.createV2AndBuyInstructions({
     global,
     mint: mintKp.publicKey,
     name,
@@ -216,24 +219,63 @@ export async function deployPumpToken(input: {
     cashback: Boolean(input.cashback),
   });
 
-  const tx = new Transaction().add(
+  if (allIxs.length < 2) {
+    throw new Error('Pump SDK returned unexpected create instruction set');
+  }
+
+  const createIxs = allIxs.slice(0, Math.min(2, allIxs.length)); // create (+ extend)
+  const buyIxs = allIxs.slice(createIxs.length); // ata + buy
+
+  const createTx = new Transaction().add(
     ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_MICROLAMPORTS }),
-    ComputeBudgetProgram.setComputeUnitLimit({ units: 400_000 }),
-    ...ixs,
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 300_000 }),
+    ...createIxs,
   );
 
-  const signature = await signAndSendTurnkey({
-    wallet: input.wallet,
-    tx,
-    extraSigners: [mintKp],
-  });
+  let createSignature: string;
+  try {
+    createSignature = await signAndSendTurnkey({
+      wallet: input.wallet,
+      tx: createTx,
+      extraSigners: [mintKp],
+    });
+  } catch (err) {
+    const msg = (err as Error).message || String(err);
+    if (/too large|1232/i.test(msg)) {
+      throw new Error(
+        'Create transaction still too large — try a shorter name/ticker, or redeploy. ' + msg,
+      );
+    }
+    throw err;
+  }
+
+  // Buy in a second tx once the curve exists
+  const buyTx = new Transaction().add(
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: PRIORITY_MICROLAMPORTS }),
+    ComputeBudgetProgram.setComputeUnitLimit({ units: 250_000 }),
+    ...buyIxs,
+  );
+
+  let buySignature: string;
+  try {
+    buySignature = await signAndSendTurnkey({
+      wallet: input.wallet,
+      tx: buyTx,
+    });
+  } catch (err) {
+    // Token exists — surface create mint so user can buy manually
+    throw new Error(
+      `Token created (${mintKp.publicKey.toBase58()}) but initial buy failed: ${(err as Error).message}. Create tx: ${createSignature}`,
+    );
+  }
 
   const ui = expectedTokens.toNumber() / 1e6;
   const supply = global.tokenTotalSupply.toNumber() / 1e6;
 
   return {
     mint: mintKp.publicKey.toBase58(),
-    signature,
+    signature: buySignature,
+    createSignature,
     buySol: input.buySol,
     expectedTokensUi: ui,
     supplyPct: supply > 0 ? (ui / supply) * 100 : 0,

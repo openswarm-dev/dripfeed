@@ -2,9 +2,9 @@ import type { LaunchRecord } from './fetchLaunches.js';
 import { analyzeMetas, type MetaDashboard } from './metaEngine.js';
 import { loadLatestReport } from './report.js';
 import type { SocialSpark } from './socialSpark.js';
-import { refreshVolumesForMints, fetchVolumeMetrics } from './volume.js';
-import { refreshPumpCoinsForMints, fetchPumpCoin } from './market.js';
 import { hydrateFromDb, initPersist, loadPersistedState, schedulePersist } from './persist.js';
+import { fetchRecentPumpCreates } from './market.js';
+import { classifyNarratives } from './classify.js';
 import { normalizeMediaUrl } from './imageKey.js';
 
 export interface FeedStatus {
@@ -91,13 +91,34 @@ function persistCurrent() {
   schedulePersist(state.launches, state.sparks, state.liveLaunches);
 }
 
+function hasLaunchLabel(l: LaunchRecord): boolean {
+  const name = l.name?.trim();
+  const sym = l.symbol?.trim();
+  if (!name && !sym) return false;
+  // mint-prefix placeholders from old false positives
+  if (sym && sym === l.mint.slice(0, 8) && !name) return false;
+  return true;
+}
+
+/** Prefer showing every real create; only hide ancient nameless junk. */
+function isUsableLaunch(l: LaunchRecord): boolean {
+  if (hasLaunchLabel(l) || !!l.metadataUri || !!l.image) return true;
+  const age = l.blockTime ? Math.floor(Date.now() / 1000) - l.blockTime : 0;
+  return age < 180;
+}
+
+function usableLaunches(launches: LaunchRecord[]): LaunchRecord[] {
+  return launches.filter(isUsableLaunch);
+}
+
 function buildState(
   launches: LaunchRecord[],
   sparks: SocialSpark[],
   liveLaunchCount = 0,
 ): LiveState {
-  const metas = analyzeMetas(launches, 4, sparks, { live: true });
-  const lastLaunch = launches
+  const clean = usableLaunches(launches);
+  const metas = analyzeMetas(clean, 4, sparks, { live: true });
+  const lastLaunch = clean
     .filter((l) => l.blockTime)
     .sort((a, b) => b.blockTime! - a.blockTime!)[0];
   const lastSpark = sparks[0];
@@ -125,7 +146,7 @@ function buildState(
       ? new Date(lastSpark.receivedAt * 1000).toISOString()
       : null,
     metas,
-    launches,
+    launches: clean,
     sparks: sparks.slice(0, 100),
   };
 }
@@ -175,36 +196,9 @@ export async function initLiveStore(): Promise<LiveState> {
   return state;
 }
 
-/** On-demand pump.fun + DexScreener refresh for hover panels. */
+/** Return cached launch only — no pump.fun / DexScreener (keeps create stream healthy). */
 export async function forceRefreshLaunch(mint: string): Promise<LaunchRecord | null> {
-  const current = getState();
-  const existing = current.launches.find((l) => l.mint === mint);
-  if (!existing) return null;
-
-  const [pump, vol] = await Promise.all([
-    fetchPumpCoin(mint),
-    fetchVolumeMetrics(mint),
-  ]);
-
-  const patched: LaunchRecord = mergeLaunchRecord(existing, {
-    ...existing,
-    name: pump?.name,
-    symbol: pump?.symbol,
-    description: pump?.description,
-    image: normalizeMediaUrl(pump?.image) ?? existing.image,
-    marketCapUsd: pump?.marketCapUsd,
-    bonded: pump?.bonded,
-    holderCount: pump?.holderCount,
-    bondingProgressPct: pump?.bondingProgressPct,
-    marketUpdatedAt: pump?.updatedAt,
-    volumeUsd24h: vol?.volumeUsd24h,
-    volumeUsd1h: vol?.volumeUsd1h,
-    txns24h: vol?.txns24h,
-    volumeUpdatedAt: vol?.volumeUpdatedAt,
-  });
-
-  updateLaunch(patched);
-  return getState().launches.find((l) => l.mint === mint) ?? patched;
+  return getState().launches.find((l) => l.mint === mint) ?? null;
 }
 
 export function getState(): LiveState {
@@ -255,6 +249,33 @@ export function addLaunch(launch: LaunchRecord) {
 
   recordCreateStored();
   const launches = [launch, ...current.launches].slice(0, 5000);
+
+  // Soft path: push to UI immediately — never run analyzeMetas on the hot create path.
+  if (state) {
+    state = {
+      ...state,
+      launches,
+      liveLaunches: current.liveLaunches + 1,
+      lastLaunchAt: launch.blockTime
+        ? new Date(launch.blockTime * 1000).toISOString()
+        : state.lastLaunchAt,
+      feeds: {
+        geyser: geyserConnected,
+        tweetstream: tweetstreamConnected,
+        tweetstreamAccounts: state.feeds.tweetstreamAccounts,
+      },
+      geyserStats: { ...geyserStats, perMinute: recentCreateTimes.length },
+    };
+    broadcast('launch', {
+      launch,
+      geyserStats: state.geyserStats,
+      liveLaunches: state.liveLaunches,
+    });
+    persistCurrent();
+    scheduleMetaRecalc();
+    return;
+  }
+
   state = buildState(launches, current.sparks, current.liveLaunches + 1);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
@@ -267,6 +288,21 @@ export function addLaunch(launch: LaunchRecord) {
     liveLaunches: state.liveLaunches,
   });
   persistCurrent();
+}
+
+let metaRecalcTimer: ReturnType<typeof setTimeout> | null = null;
+let metasDirty = false;
+
+/** Mark metas dirty; flushed on a short interval so Building/Hot keep moving. */
+function scheduleMetaRecalc() {
+  metasDirty = true;
+  if (metaRecalcTimer) return;
+  metaRecalcTimer = setTimeout(() => {
+    metaRecalcTimer = null;
+    if (!metasDirty) return;
+    metasDirty = false;
+    recalcMetas();
+  }, 120);
 }
 
 export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
@@ -295,6 +331,7 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
       geyserStats: { ...geyserStats },
       liveLaunches: state.liveLaunches,
     });
+    scheduleMetaRecalc();
     return;
   }
 
@@ -336,98 +373,72 @@ export function recalcMetas() {
   state = buildState(current.launches, current.sparks, current.liveLaunches);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
-  rebroadcast();
+  // Always push metas so Building / Hot / opportunity clusters move in the UI.
+  broadcast('refresh', {
+    metas: state.metas,
+    geyserStats: state.geyserStats,
+    liveLaunches: state.liveLaunches,
+    launches: state.launches.slice(0, 120),
+  });
 }
 
-let volumeRefreshRunning = false;
-let volumePollOffset = 0;
-const METRICS_BATCH = 36;
-const NEWEST_PRIORITY = 18;
-
-function needsMetrics(l: LaunchRecord): boolean {
-  return (
-    l.marketCapUsd == null
-    || l.holderCount == null
-    || l.volumeUsd1h == null
-    || l.txns24h == null
-    || l.bondingProgressPct == null
-  );
-}
-
-/** Poll DexScreener + pump.fun for recent launches (newest always first, then rotate). */
+/** Metrics polling disabled — pump.fun/DexScreener starved ERPC create handling. */
 export async function refreshLaunchVolumes() {
-  if (volumeRefreshRunning || !state) return;
-  volumeRefreshRunning = true;
+  return;
+}
+
+/**
+ * Gap-fill newest pump.fun creates via one list API call (identity only).
+ * Catches tokens ERPC missed without per-mint metrics polling.
+ */
+let createSyncRunning = false;
+export async function syncRecentPumpCreates() {
+  if (createSyncRunning || !state) return;
+  createSyncRunning = true;
   try {
+    const recent = await fetchRecentPumpCreates(50);
+    if (!recent.length) return;
+
     const current = getState();
-    const now = Math.floor(Date.now() / 1000);
-    const recentSorted = current.launches
-      .filter((l) => l.blockTime && now - l.blockTime <= 7200)
-      .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0));
-    const missingMetrics = recentSorted.filter(needsMetrics).slice(0, NEWEST_PRIORITY).map((l) => l.mint);
-    const newest = [
-      ...missingMetrics,
-      ...recentSorted.slice(0, NEWEST_PRIORITY).map((l) => l.mint),
-    ].filter((m, i, arr) => arr.indexOf(m) === i).slice(0, NEWEST_PRIORITY);
-    const recent = recentSorted.map((l) => l.mint);
-    const metaMints = [
-      ...current.metas.active,
-      ...current.metas.forming,
-      ...(current.metas.emerging ?? []),
-    ].flatMap((m) => m.tokens.map((t) => t.mint));
-    const rotatePool = [...new Set([...recent, ...metaMints])].filter((m) => !newest.includes(m));
-    if (!newest.length && !rotatePool.length) return;
+    const known = new Set(current.launches.map((l) => l.mint));
+    let added = 0;
 
-    volumePollOffset = rotatePool.length ? volumePollOffset % rotatePool.length : 0;
-    const rotated: string[] = [];
-    const rotateCount = Math.max(0, METRICS_BATCH - newest.length);
-    for (let i = 0; i < rotateCount && rotatePool.length; i++) {
-      rotated.push(rotatePool[(volumePollOffset + i) % rotatePool.length]!);
-    }
-    if (rotatePool.length) {
-      volumePollOffset = (volumePollOffset + rotateCount) % rotatePool.length;
-    }
+    // Newest-first; yield between adds so each create flushes its own SSE event
+    // instead of dumping a batch into one TCP/React tick.
+    for (const coin of recent) {
+      if (known.has(coin.mint)) continue;
+      known.add(coin.mint);
 
-    const mints = [...new Set([...newest, ...rotated])];
-
-    const [volumes, markets] = await Promise.all([
-      refreshVolumesForMints(mints, 10),
-      refreshPumpCoinsForMints(mints, 10),
-    ]);
-    if (!volumes.size && !markets.size) return;
-
-    let changed = false;
-    const launches = current.launches.map((l) => {
-      const vol = volumes.get(l.mint);
-      const mkt = markets.get(l.mint);
-      if (!vol && !mkt) return l;
-      changed = true;
-      return mergeLaunchRecord(l, {
-        ...l,
-        name: mkt?.name,
-        symbol: mkt?.symbol,
-        image: mkt?.image,
-        volumeUsd24h: vol?.volumeUsd24h,
-        volumeUsd1h: vol?.volumeUsd1h,
-        txns24h: vol?.txns24h,
-        volumeUpdatedAt: vol?.volumeUpdatedAt,
-        marketCapUsd: mkt?.marketCapUsd,
-        bonded: mkt?.bonded,
-        holderCount: mkt?.holderCount,
-        bondingProgressPct: mkt?.bondingProgressPct,
-        marketUpdatedAt: mkt?.updatedAt,
+      const cls = classifyNarratives({
+        name: coin.name,
+        symbol: coin.symbol,
+        mint: coin.mint,
       });
-    });
 
-    if (changed) {
-      state = buildState(launches, current.sparks, current.liveLaunches);
-      state.feeds.geyser = geyserConnected;
-      state.feeds.tweetstream = tweetstreamConnected;
-      rebroadcast();
-      persistCurrent();
+      addLaunch({
+        signature: `pump-sync:${coin.mint}`,
+        slot: 0,
+        blockTime: coin.createdAt || Math.floor(Date.now() / 1000),
+        mint: coin.mint,
+        creator: coin.creator ?? '',
+        isCreateV2: true,
+        name: coin.name,
+        symbol: coin.symbol,
+        image: normalizeMediaUrl(coin.image),
+        metadataUri: coin.metadataUri,
+        narratives: cls.narratives,
+        primaryNarrative: cls.primaryNarrative,
+        narrativeScore: cls.narrativeScore,
+      });
+      added += 1;
+      await new Promise((r) => setImmediate(r));
+    }
+
+    if (added) {
+      console.log(`[sync] gap-filled ${added} creates from pump.fun list`);
     }
   } finally {
-    volumeRefreshRunning = false;
+    createSyncRunning = false;
   }
 }
 

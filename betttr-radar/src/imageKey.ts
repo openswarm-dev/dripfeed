@@ -1,16 +1,42 @@
 /** Normalize pump/IPFS/Arweave media URLs to a fetchable https form. */
+const IPFS_GATEWAYS = [
+  'https://dweb.link/ipfs/',
+  'https://ipfs.io/ipfs/',
+  'https://nftstorage.link/ipfs/',
+  'https://w3s.link/ipfs/',
+];
+
+export function ipfsCidFromUrl(url?: string): string | null {
+  if (!url) return null;
+  const u = url.trim();
+  if (u.startsWith('ipfs://')) return u.slice(7).replace(/^ipfs\//, '');
+  const m = u.match(/\/ipfs\/([^/?#]+)/i);
+  return m?.[1] ?? null;
+}
+
+export function ipfsGatewayUrls(url?: string): string[] {
+  const cid = ipfsCidFromUrl(url);
+  if (!cid) {
+    const n = normalizeMediaUrl(url);
+    return n ? [n] : [];
+  }
+  return IPFS_GATEWAYS.map((g) => `${g}${cid}`);
+}
+
 export function normalizeMediaUrl(url?: string): string | undefined {
   if (!url) return undefined;
   let u = url.trim();
   if (u.startsWith('ipfs://')) {
-    return `https://cf-ipfs.com/ipfs/${u.slice(7)}`;
+    return `${IPFS_GATEWAYS[0]}${u.slice(7).replace(/^ipfs\//, '')}`;
   }
   if (u.startsWith('ar://')) return `https://arweave.net/${u.slice(5)}`;
 
-  // Prefer Cloudflare IPFS gateway over slow public ipfs.io
-  u = u.replace('https://ipfs.io/ipfs/', 'https://cf-ipfs.com/ipfs/');
-  u = u.replace('http://ipfs.io/ipfs/', 'https://cf-ipfs.com/ipfs/');
-  u = u.replace('https://gateway.pinata.cloud/ipfs/', 'https://cf-ipfs.com/ipfs/');
+  // Prefer working public gateways over dead cf-ipfs.com
+  u = u.replace('https://cf-ipfs.com/ipfs/', IPFS_GATEWAYS[0]!);
+  u = u.replace('https://cloudflare-ipfs.com/ipfs/', IPFS_GATEWAYS[0]!);
+  u = u.replace('https://gateway.pinata.cloud/ipfs/', IPFS_GATEWAYS[0]!);
+  u = u.replace('https://ipfs.io/ipfs/', IPFS_GATEWAYS[0]!);
+  u = u.replace('http://ipfs.io/ipfs/', IPFS_GATEWAYS[0]!);
 
   return u;
 }

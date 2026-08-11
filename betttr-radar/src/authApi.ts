@@ -78,11 +78,19 @@ function rpcUrl(): string {
   );
 }
 
-/** Fast balance via raw JSON-RPC — avoids flaky/slow @solana/web3.js Connection. */
+/** Short-lived balance cache — long TTLs made the UI look stuck after buy/withdraw. */
 const balanceCache = new Map<string, { lamports: number; at: number }>();
 const walletCache = new Map<string, { wallet: Awaited<ReturnType<typeof getWalletForUser>>; at: number }>();
-const BALANCE_TTL_MS = 30_000;
+const BALANCE_TTL_MS = 4_000;
 const WALLET_TTL_MS = 5 * 60_000;
+
+function invalidateBalance(address?: string | null) {
+  if (!address) {
+    balanceCache.clear();
+    return;
+  }
+  balanceCache.delete(address);
+}
 
 async function cachedWallet(userId: string) {
   const hit = walletCache.get(userId);
@@ -92,13 +100,18 @@ async function cachedWallet(userId: string) {
   return wallet;
 }
 
-async function fetchSolBalanceLamports(address: string): Promise<number | null> {
+async function fetchSolBalanceLamports(
+  address: string,
+  opts?: { fresh?: boolean },
+): Promise<number | null> {
   if (!address || address.startsWith('DEV')) return null;
   const cached = balanceCache.get(address);
-  if (cached && Date.now() - cached.at < BALANCE_TTL_MS) return cached.lamports;
+  if (!opts?.fresh && cached && Date.now() - cached.at < BALANCE_TTL_MS) {
+    return cached.lamports;
+  }
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 1800);
+  const timer = setTimeout(() => controller.abort(), 5_000);
   try {
     const res = await fetch(heliusOrRpcUrl(), {
       method: 'POST',
@@ -233,7 +246,8 @@ export async function handleWalletApi(
       json(res, 404, { error: 'No wallet for this account' });
       return true;
     }
-    const balanceLamports = await fetchSolBalanceLamports(wallet.address);
+    // Explicit balance reads always hit RPC — short cache only helps /auth/me.
+    const balanceLamports = await fetchSolBalanceLamports(wallet.address, { fresh: true });
     json(res, 200, {
       address: wallet.address,
       balanceLamports,
@@ -377,6 +391,7 @@ export async function handleWalletApi(
       });
       await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
+      invalidateBalance(wallet.address);
       json(res, 200, { signature: sig, amountSol, to });
     } catch (err) {
       json(res, 400, { error: (err as Error).message });
@@ -460,6 +475,7 @@ export async function handleWalletApi(
         metaTheme: body.metaTheme ?? null,
       });
 
+      invalidateBalance(wallet.address);
       json(res, 201, { ...deployed, deploy: row });
     } catch (err) {
       json(res, 400, { error: (err as Error).message });
@@ -515,6 +531,7 @@ export async function handleWalletApi(
         buySol: Number(body.buySol),
         slippagePercent: body.slippagePercent,
       });
+      invalidateBalance(wallet.address);
       json(res, 200, result);
     } catch (err) {
       json(res, 400, { error: (err as Error).message });
@@ -539,6 +556,7 @@ export async function handleWalletApi(
         percent: Number(body.percent),
         slippagePercent: body.slippagePercent,
       });
+      invalidateBalance(wallet.address);
       json(res, 200, result);
     } catch (err) {
       json(res, 400, { error: (err as Error).message });

@@ -13,6 +13,17 @@ export interface PumpCoinData {
   updatedAt: number;
 }
 
+/** Identity-only recent create (for gap-fill — not metrics). */
+export interface PumpRecentCreate {
+  mint: string;
+  name?: string;
+  symbol?: string;
+  image?: string;
+  metadataUri?: string;
+  creator?: string;
+  createdAt: number;
+}
+
 const GRADUATION_MCAP_USD = 69_000;
 const cache = new Map<string, { at: number; data: PumpCoinData }>();
 const CACHE_MS = 3_000;
@@ -92,4 +103,51 @@ export async function refreshPumpCoinsForMints(
     await new Promise((r) => setTimeout(r, 60));
   }
   return out;
+}
+
+/**
+ * One list call for newest creates — identity only (name/symbol/image).
+ * Used to gap-fill ERPC misses without per-mint metrics hammering.
+ */
+export async function fetchRecentPumpCreates(limit = 50): Promise<PumpRecentCreate[]> {
+  try {
+    const url =
+      `https://frontend-api-v3.pump.fun/coins?offset=0&limit=${limit}` +
+      `&sort=created_timestamp&order=DESC&includeNsfw=true`;
+    const res = await fetch(url, {
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'Mozilla/5.0 (compatible; BetttrRadar/1.0)',
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as Array<{
+      mint?: string;
+      name?: string;
+      symbol?: string;
+      image_uri?: string;
+      metadata_uri?: string;
+      creator?: string;
+      created_timestamp?: number;
+    }>;
+    if (!Array.isArray(data)) return [];
+    return data
+      .filter((c) => typeof c.mint === 'string' && c.mint.length >= 32)
+      .map((c) => {
+        let createdAt = Number(c.created_timestamp ?? 0);
+        if (createdAt > 1e12) createdAt = Math.floor(createdAt / 1000);
+        return {
+          mint: c.mint!,
+          name: c.name,
+          symbol: c.symbol,
+          image: c.image_uri,
+          metadataUri: c.metadata_uri,
+          creator: c.creator,
+          createdAt,
+        };
+      });
+  } catch {
+    return [];
+  }
 }

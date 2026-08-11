@@ -3,8 +3,9 @@ import jwt from 'jsonwebtoken';
 
 export interface AuthPayload {
   userId: string;
-  twitterId: string;
-  twitterHandle: string;
+  username?: string;
+  twitterId?: string;
+  twitterHandle?: string;
 }
 
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
@@ -25,4 +26,8 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 export function signToken(payload: AuthPayload): string {
   return jwt.sign(payload, process.env.JWT_SECRET!, { expiresIn: '30d' });
+}
+
+export function getAuthUser(req: Request): AuthPayload {
+  return (req as Request & { user: AuthPayload }).user;
 }

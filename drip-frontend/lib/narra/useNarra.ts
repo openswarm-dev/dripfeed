@@ -5,7 +5,6 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
-const CACHE_KEY = "betttr_report_cache_v1";
 
 const EMPTY_LIVE: NarraLive = {
   connected: false,
@@ -32,35 +31,6 @@ function reportToState(report: NarraReport): NarraState {
     geyserEnabled: report.geyserEnabled,
     live: report.live ?? EMPTY_LIVE,
   };
-}
-
-function readCachedState(): NarraState | null {
-  try {
-    const raw = sessionStorage.getItem(CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as NarraReport & { cachedAt?: number };
-    if (!parsed || parsed.error) return null;
-    // Drop caches older than 10 minutes
-    if (parsed.cachedAt && Date.now() - parsed.cachedAt > 10 * 60_000) return null;
-    return reportToState(parsed);
-  } catch {
-    return null;
-  }
-}
-
-function writeCachedState(state: NarraState) {
-  try {
-    const payload = {
-      ...state,
-      generatedAt: new Date().toISOString(),
-      days: state.metas?.lookbackDays,
-      totalLaunches: state.metas?.totalLaunches,
-      cachedAt: Date.now(),
-    };
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
-  } catch {
-    /* quota / private mode */
-  }
 }
 
 type PartialPayload = Partial<NarraReport & {
@@ -211,6 +181,9 @@ export function useNarra() {
   const hydratedRef = useRef(false);
 
   const mergePartial = useCallback((data: PartialPayload) => {
+    // Hot path: update React state only — never write sessionStorage here.
+    // Serializing thousands of launches on every create blocked the main thread
+    // and made new tokens appear in batches.
     setState((prev) => {
       const base = prev ?? {
         metas: null,
@@ -220,22 +193,11 @@ export function useNarra() {
         geyserEnabled: undefined,
         live: EMPTY_LIVE,
       };
-      const next = mergePayload(base, data);
-      writeCachedState(next);
-      return next;
+      return mergePayload(base, data);
     });
   }, []);
 
-  // Instant paint from session cache, then revalidate in parallel with SSE
   useEffect(() => {
-    const cached = readCachedState();
-    if (cached?.launches?.length || cached?.metas) {
-      setState(cached);
-      setLoading(false);
-      setLoaderDone(true);
-      hydratedRef.current = true;
-    }
-
     let cancelled = false;
 
     async function load() {
@@ -248,11 +210,7 @@ export function useNarra() {
             setError(report.error ?? "Radar service unavailable");
           }
         } else {
-          setState((prev) => {
-            const next = prev ? mergePayload(prev, report) : reportToState(report);
-            writeCachedState(next);
-            return next;
-          });
+          setState((prev) => (prev ? mergePayload(prev, report) : reportToState(report)));
           setError(null);
           hydratedRef.current = true;
         }
@@ -275,7 +233,6 @@ export function useNarra() {
   }, []);
 
   useEffect(() => {
-    // Open SSE immediately — don't wait for report (was causing empty 10–30s shells)
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
 
@@ -298,6 +255,7 @@ export function useNarra() {
       hydratedRef.current = true;
     });
 
+    // One create → one paint. Do not coalesce into report polls.
     es.addEventListener("launch", (e) => {
       mergePartial(JSON.parse((e as MessageEvent).data));
     });
@@ -314,25 +272,7 @@ export function useNarra() {
       /* EventSource auto-reconnects */
     };
 
-    const poll = setInterval(async () => {
-      try {
-        const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
-        if (!res.ok) return;
-        const report: NarraReport = await res.json();
-        if (!report.error) {
-          setState((prev) => {
-            const next = mergePayload(prev ?? reportToState(report), report);
-            writeCachedState(next);
-            return next;
-          });
-        }
-      } catch {
-        /* ignore */
-      }
-    }, 12_000);
-
     return () => {
-      clearInterval(poll);
       es.close();
       esRef.current = null;
     };
