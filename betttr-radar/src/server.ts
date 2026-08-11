@@ -22,6 +22,7 @@ import {
   fetchTweetStreamMe,
 } from './tweetStreamFeed.js';
 import { enrichLaunchLive } from './enrich.js';
+import { flushPersist } from './persist.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -194,6 +195,7 @@ server.listen(config.port, HOST, async () => {
   setInterval(() => void refreshLaunchVolumes(), 5_000);
   setInterval(refreshFromReport, 60_000);
   setInterval(() => void enrichStaleLaunches(), 4_000);
+  setInterval(() => flushPersist(), 30_000);
 
   if (config.tweetstreamApiKey) {
     await fetchTweetStreamMe();

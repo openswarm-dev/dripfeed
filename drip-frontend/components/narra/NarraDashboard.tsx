@@ -345,12 +345,6 @@ export default function NarraDashboard({
     ?? metas?.all[0]
     ?? null;
 
-  const stageFilterCount = useMemo(() => {
-    if (!stageFilter || !metas) return 0;
-    const all = [...(metas.emerging ?? []), ...metas.forming, ...metas.active];
-    return all.filter((m) => metaMatchesStage(m, stageFilter, sparks)).length;
-  }, [stageFilter, metas, sparks]);
-
   const timelineEvents = useMemo(() => {
     const events: TimelineEvent[] = [];
     const seenMints = new Set<string>();
@@ -641,13 +635,6 @@ export default function NarraDashboard({
                 })}
               </div>
             )}
-            {stageFilter && (
-              <p className="stage-filter-hint">
-                Showing <strong>{stageFilterCount}</strong> at <strong>{capitalize(stageFilter)}</strong>
-                {" · "}
-                <button type="button" className="stage-filter-clear" onClick={() => setStageFilter(null)}>clear</button>
-              </p>
-            )}
           </BetttrCard>
         </div>
 
@@ -790,33 +777,33 @@ function LaunchRow({
     >
       <TokenImage src={l.image} size={30} priority />
       <div className="launch-meta">
-        <div className={`sym ${pending ? "sym--pending" : ""}`}>
+        <div className="sym">
           {label}
-          {l.isCreateV2 && !pending && <span className="v2-tag">V2</span>}
+          {l.isCreateV2 && <span className="v2-tag">V2</span>}
           {l.bonded && <span className="bond-tag bonded">Graduated</span>}
           {!l.bonded && l.bondingProgressPct != null && l.bondingProgressPct > 0 && (
             <span className="bond-tag">{l.bondingProgressPct}%</span>
           )}
+          {sub && <span className="name-inline">{sub}</span>}
         </div>
-        {sub && <div className={`name-line ${pending ? "name-line--pending" : ""}`}>{sub}</div>}
       </div>
       <div className="launch-side">
         {l.blockTime && (
           <span className="age-tag launch-age"><LiveAge ts={l.blockTime} /></span>
         )}
-        {!pending && l.marketCapUsd ? (
+        {l.marketCapUsd ? (
           <span className={`mcap-tag ${mcapDir === "up" ? "metric-up" : ""}`}>${formatCompact(l.marketCapUsd)}</span>
         ) : null}
-        {!pending && l.txns24h ? (
+        {l.txns24h ? (
           <span className={`tx-tag ${txDir === "up" ? "metric-up" : ""}`}>{l.txns24h} tx</span>
         ) : null}
-        {!pending && l.holderCount ? (
-          <span className={`holder-tag ${holderDir === "up" ? "metric-up" : ""}`}>{l.holderCount} holders</span>
+        {l.holderCount ? (
+          <span className={`holder-tag ${holderDir === "up" ? "metric-up" : ""}`}>{l.holderCount}h</span>
         ) : null}
-        {!pending && l.volumeUsd1h ? (
-          <span className={`vol-tag ${volDir === "up" ? "metric-up" : ""}`}>${formatCompact(l.volumeUsd1h)}/1h</span>
+        {l.volumeUsd1h ? (
+          <span className={`vol-tag ${volDir === "up" ? "metric-up" : ""}`}>${formatCompact(l.volumeUsd1h)}</span>
         ) : null}
-        <PumpFunButton mint={l.mint} />
+        <PumpFunButton mint={l.mint} size={22} />
       </div>
     </div>
   );

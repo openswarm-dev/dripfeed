@@ -896,18 +896,7 @@
 }
 
 .launch-row--pending {
-  opacity: 0.85;
-}
-
-.launch-row .sym--pending {
-  color: var(--radar-subtle);
-  font-style: italic;
-  font-weight: 600;
-}
-
-.launch-row .name-line--pending {
-  color: var(--radar-faint);
-  font-size: 10px;
+  opacity: 0.9;
 }
 
 .launch-row:hover {
@@ -939,35 +928,48 @@
   font-size: 14px;
 }
 
+.launch-meta {
+  min-width: 0;
+}
+
 .launch-meta .sym {
   font-size: 13px;
   font-weight: 700;
   font-family: var(--radar-mono);
-}
-
-.launch-meta .name-line {
-  font-size: 11px;
-  color: var(--radar-faint);
-  margin-top: 2px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.launch-meta .name-inline {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--radar-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .v2-tag {
   font-size: 9px;
-  margin-left: 4px;
   padding: 1px 4px;
   border-radius: 4px;
   background: var(--radar-el);
   color: var(--radar-faint);
+  flex-shrink: 0;
 }
 
 .launch-side {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .launch-side a {
