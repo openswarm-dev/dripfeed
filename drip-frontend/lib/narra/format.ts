@@ -41,7 +41,7 @@ export function findMeta(metas: import("./types").MetaDashboard, id: string | nu
     ?? metas.forming.find((m) => m.id === id)
     ?? metas.active.find((m) => m.id === id)
     ?? metas.fading?.find((m) => m.id === id)
-    ?? metas.all.find((m) => m.id === id)
+    ?? metas.all?.find((m) => m.id === id)
     ?? null
   );
 }

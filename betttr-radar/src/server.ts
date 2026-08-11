@@ -28,6 +28,7 @@ import { ensureAuthSchema } from './authStore.js';
 import { ensureDeploySchema } from './deployStore.js';
 import { handleAuthApi, handleWalletApi } from './authApi.js';
 import { turnkeyConfigured } from './turnkey.js';
+import { slimLaunchForWire, slimMetasForWire } from './wirePayload.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -89,10 +90,9 @@ function buildStreamInitPayload() {
     liveSparks: state.liveSparks,
     lastLaunchAt: state.lastLaunchAt,
     lastSparkAt: state.lastSparkAt,
-    metas: state.metas,
-    // Cap payload — full launch history was multi‑MB and stalled first paint via Railway
-    launches: state.launches.slice(0, 200),
-    sparks: state.sparks.slice(0, 50),
+    metas: slimMetasForWire(state.metas),
+    launches: state.launches.slice(0, 120).map(slimLaunchForWire),
+    sparks: state.sparks.slice(0, 40),
     geyserEnabled: config.geyserEnabled,
   };
 }
@@ -103,16 +103,15 @@ function buildReportPayload() {
     generatedAt: state.metas.generatedAt,
     days: state.metas.lookbackDays,
     totalLaunches: state.metas.totalLaunches,
-    metas: state.metas,
-    launches: state.launches.slice(0, 200),
-    sparks: state.sparks.slice(0, 50),
+    metas: slimMetasForWire(state.metas),
+    launches: state.launches.slice(0, 120).map(slimLaunchForWire),
+    sparks: state.sparks.slice(0, 40),
     geyserStats: state.geyserStats,
     geyserEnabled: config.geyserEnabled,
     live: {
       connected: state.connected,
       feeds: {
         ...state.feeds,
-        // Treat recent create activity as live even if the flag briefly flaps
         geyser: state.feeds.geyser || (state.geyserStats?.perMinute ?? 0) > 0,
       },
       liveLaunches: state.liveLaunches,

@@ -6,6 +6,7 @@ import { hydrateFromDb, initPersist, loadPersistedState, schedulePersist } from 
 import { fetchRecentPumpCreates } from './market.js';
 import { classifyNarratives } from './classify.js';
 import { normalizeMediaUrl } from './imageKey.js';
+import { slimLaunchForWire, slimMetasForWire } from './wirePayload.js';
 
 export interface FeedStatus {
   geyser: boolean;
@@ -154,9 +155,9 @@ function buildState(
 function rebroadcast() {
   if (!state) return;
   broadcast('refresh', {
-    metas: state.metas,
+    metas: slimMetasForWire(state.metas),
     sparks: state.sparks,
-    launches: state.launches.slice(0, 200),
+    launches: state.launches.slice(0, 80).map(slimLaunchForWire),
     geyserStats: state.geyserStats,
     liveLaunches: state.liveLaunches,
   });
@@ -375,10 +376,9 @@ export function recalcMetas() {
   state.feeds.tweetstream = tweetstreamConnected;
   // Always push metas so Building / Hot / opportunity clusters move in the UI.
   broadcast('refresh', {
-    metas: state.metas,
+    metas: slimMetasForWire(state.metas),
     geyserStats: state.geyserStats,
     liveLaunches: state.liveLaunches,
-    launches: state.launches.slice(0, 120),
   });
 }
 

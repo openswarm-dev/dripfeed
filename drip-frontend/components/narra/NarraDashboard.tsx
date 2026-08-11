@@ -176,7 +176,7 @@ function MetaCard({
   );
 }
 
-function NarraLoader({ onDone }: { onDone: () => void }) {
+function NarraLoader({ onDone, ready }: { onDone: () => void; ready?: boolean }) {
   const [geyser, setGeyser] = useState<"wait" | "loading" | "done">("loading");
   const [x, setX] = useState<"wait" | "loading" | "done">("wait");
   const [meta, setMeta] = useState<"wait" | "loading" | "done">("wait");
@@ -199,7 +199,6 @@ function NarraLoader({ onDone }: { onDone: () => void }) {
     const started = performance.now();
     const iv = setInterval(() => {
       const elapsed = performance.now() - started;
-      // Ease to 92% over ~3.2s, never bounce backward.
       const target = Math.min(92, (elapsed / 3200) * 92);
       setProgress((p) => (target > p ? target : p));
     }, 50);
@@ -216,14 +215,19 @@ function NarraLoader({ onDone }: { onDone: () => void }) {
       setProgress(100);
       setTimeout(() => {
         setOut(true);
-        setTimeout(() => onDoneRef.current(), 450);
-      }, 400);
+        setTimeout(() => onDoneRef.current(), 280);
+      }, 120);
     };
 
-    // Minimum show time so steps can play; then exit once.
+    // Data already here → skip the fake 3.8s wait.
+    if (ready) {
+      const t = setTimeout(finish, 180);
+      return () => clearTimeout(t);
+    }
+
     const t = setTimeout(finish, 3800);
     return () => clearTimeout(t);
-  }, []);
+  }, [ready]);
 
   const step = (id: string, status: typeof geyser, label: string) => (
     <div className={`loader-step ${status === "loading" ? "active" : ""} ${status === "done" ? "done" : ""}`} id={`loader-${id}`}>
@@ -276,7 +280,7 @@ export default function NarraDashboard({
   state,
   error,
   loading,
-  loaderDone: _loaderDone,
+  loaderDone,
   onLoaderDone,
   skipBoot = false,
 }: {
@@ -347,14 +351,15 @@ export default function NarraDashboard({
   }, [onLoaderDone]);
 
   useEffect(() => {
-    if (loading) return;
     if (error) {
       dismissLoader();
       return;
     }
-    // Don't hard-cut the branded loader when SSE connects early —
-    // NarraLoader finishes on its own timeline via dismissLoader.
-  }, [loading, error, dismissLoader]);
+    // Data arrived (boot cache / report / SSE) — stop hiding the radar behind a fake wait.
+    if (!loading && (loaderDone || metas)) {
+      /* NarraLoader exits early via ready=true */
+    }
+  }, [loading, error, dismissLoader, loaderDone, metas]);
 
   const formingClusters = useMemo(() => {
     if (!metas) return [];
@@ -371,7 +376,6 @@ export default function NarraDashboard({
   const hero = activeMetas[0]
     ?? formingClusters[0]
     ?? metas?.emerging?.[0]
-    ?? metas?.all[0]
     ?? null;
 
   const timelineEvents = useMemo(() => {
@@ -553,7 +557,12 @@ export default function NarraDashboard({
   }, [timelineEvents]);
 
   if (showLoader) {
-    return <NarraLoader onDone={dismissLoader} />;
+    return (
+      <NarraLoader
+        onDone={dismissLoader}
+        ready={Boolean(loaderDone || metas || (!loading && state))}
+      />
+    );
   }
 
   return (
