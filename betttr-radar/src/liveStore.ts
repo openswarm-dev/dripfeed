@@ -479,7 +479,9 @@ export async function syncRecentPumpCreates() {
         narrativeScore: cls.narrativeScore,
       });
       added += 1;
-      await new Promise((r) => setImmediate(r));
+      // Space SSE writes so the proxy/client can paint one create at a time
+      // instead of coalescing a whole gap-fill into one frame.
+      await new Promise((r) => setTimeout(r, 40));
     }
 
     if (added) {

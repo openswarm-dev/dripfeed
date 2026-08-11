@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, LaunchRecord, SocialSpark } from "./types";
 
 /** Same-origin proxy — see app/api/radar/* */
@@ -279,6 +280,32 @@ export function useNarra() {
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
 
+    // Paint one create per frame — EventSource often delivers a gap-fill burst
+    // in one chunk and React 18 would coalesce them into a single batch update.
+    const launchQueue: PartialPayload[] = [];
+    let draining = false;
+    const drainLaunches = () => {
+      const next = launchQueue.shift();
+      if (!next) {
+        draining = false;
+        return;
+      }
+      flushSync(() => {
+        mergePartial(next);
+      });
+      if (launchQueue.length) {
+        requestAnimationFrame(drainLaunches);
+      } else {
+        draining = false;
+      }
+    };
+    const enqueueLaunch = (data: PartialPayload) => {
+      launchQueue.push(data);
+      if (draining) return;
+      draining = true;
+      requestAnimationFrame(drainLaunches);
+    };
+
     es.addEventListener("init", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
       mergePartial(
@@ -302,7 +329,7 @@ export function useNarra() {
     });
 
     es.addEventListener("launch", (e) => {
-      mergePartial(JSON.parse((e as MessageEvent).data));
+      enqueueLaunch(JSON.parse((e as MessageEvent).data));
     });
 
     es.addEventListener("spark", (e) => {
@@ -318,6 +345,7 @@ export function useNarra() {
     };
 
     return () => {
+      launchQueue.length = 0;
       es.close();
       esRef.current = null;
     };

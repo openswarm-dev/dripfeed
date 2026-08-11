@@ -118,7 +118,6 @@ setInterval(() => {
 
 function shouldFullParse(txWrap: any): boolean {
   const logs = cheapLogs(txWrap);
-  if (!logs.length) return true;
   if (logs.some((l) => l.includes('Instruction: CreateV2'))) return true;
   if (
     logs.some(
@@ -131,16 +130,13 @@ function shouldFullParse(txWrap: any): boolean {
   ) {
     return true;
   }
-  // Only scan raw discs when logs look empty of trade noise — avoids expensive
-  // false full-parses on buys that stall the create stream.
-  const looksLikeTrade = logs.some(
-    (l) =>
-      l.includes('Instruction: Buy')
-      || l.includes('Instruction: Sell')
-      || l.includes('Instruction: GetFees'),
-  );
-  if (looksLikeTrade) return false;
-  return rawHasCreateDisc(txWrap);
+  // Create+buy bundles often log Buy (and truncate Create). Never skip disc scan
+  // just because a trade instruction is present — that was starving live creates
+  // and forcing gap-fill batches.
+  if (rawHasCreateDisc(txWrap)) return true;
+  // No logs and no disc — still try (some geyser payloads omit logMessages).
+  if (!logs.length) return true;
+  return false;
 }
 
 export async function startGeyserFeed() {
