@@ -19,18 +19,32 @@ const STAGE_LABELS: Record<string, string> = {
 export function OpportunityFeedCard({
   ev,
   flash,
+  selected = false,
+  onSelect,
 }: {
   ev: TimelineEvent;
   flash: boolean;
+  selected?: boolean;
+  onSelect?: (ev: TimelineEvent) => void;
 }) {
   const tierClass = ev.tier > 0 ? `timeline-event--tier-${ev.tier}` : "";
   const flashClass = flash ? "timeline-event--flash" : "";
+  const selectedClass = selected ? "opp-feed-card--selected" : "";
   const stageLabel = STAGE_LABELS[ev.stage] ?? ev.stage.toUpperCase();
   const title = ev.isLaunch ? ev.theme : displayTheme(ev.theme);
 
   return (
     <article
-      className={`opp-feed-card timeline-event ${tierClass} ${flashClass} ${ev.isLaunch ? "timeline-event--launch" : ""}`}
+      role="button"
+      tabIndex={0}
+      className={`opp-feed-card timeline-event ${tierClass} ${flashClass} ${selectedClass} ${ev.isLaunch ? "timeline-event--launch" : ""}`}
+      onClick={() => onSelect?.(ev)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect?.(ev);
+        }
+      }}
     >
       <div className="opp-feed-card__row">
         <TokenImage src={ev.image} size={40} className="opp-feed-card__img" priority />

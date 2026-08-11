@@ -89,6 +89,8 @@ function MetaCard({
   heatIntensity = 0,
   surging = false,
   prevSnapshot,
+  focusHit = false,
+  focusDimmed = false,
   onHover,
   onHoverEnd,
 }: {
@@ -99,6 +101,8 @@ function MetaCard({
   heatIntensity?: number;
   surging?: boolean;
   prevSnapshot?: ReturnType<typeof metaSnapshot>;
+  focusHit?: boolean;
+  focusDimmed?: boolean;
   onHover: (m: MetaTrack, el: HTMLElement) => void;
   onHoverEnd: () => void;
 }) {
@@ -106,16 +110,18 @@ function MetaCard({
     ? metaMatchesStage(m, stageFilter, sparks ?? [])
     : false;
   const stageDimmed = !!stageFilter && !stageHit;
+  const hit = stageHit || focusHit;
+  const dimmed = focusDimmed || (stageDimmed && !focusHit);
   const prev = prevSnapshot ?? metaSnapshot(m);
   const countDir = metricDir(m.launchCount, prev.launchCount);
   const volDir = metricDir(m.totalVolumeUsd1h, prev.totalVolumeUsd1h);
   const txDir = metricDir(m.totalTxns24h, prev.totalTxns24h);
-  const glow = 0.08 + heatIntensity * 0.28;
+  const glow = 0.08 + heatIntensity * 0.28 + (focusHit ? 0.2 : 0);
 
   return (
     <button
       type="button"
-      className={`meta-item meta-item--compact ${extraClass ?? ""} ${stageHit ? "stage-hit" : ""} ${stageDimmed ? "stage-dimmed" : ""} ${surging ? "meta-item--surging" : ""}`}
+      className={`meta-item meta-item--compact ${extraClass ?? ""} ${hit ? "stage-hit" : ""} ${focusHit ? "opp-focus-hit" : ""} ${dimmed ? "stage-dimmed" : ""} ${surging ? "meta-item--surging" : ""}`}
       style={{ boxShadow: `0 0 0 1px rgba(200, 240, 255, ${glow})` }}
       onMouseEnter={(e) => onHover(m, e.currentTarget)}
       onMouseLeave={onHoverEnd}
@@ -263,6 +269,7 @@ export default function NarraDashboard({
     | { kind: "launch"; mint: string; rect: DOMRect }
     | null
   >(null);
+  const [focusOppId, setFocusOppId] = useState<string | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRefreshRef = useRef<string | null>(null);
 
@@ -441,6 +448,45 @@ export default function NarraDashboard({
 
   const opportunityFeed = timelineEvents;
 
+  const focusedOpportunity = useMemo(
+    () => (focusOppId ? opportunityFeed.find((e) => e.feedId === focusOppId) ?? null : null),
+    [focusOppId, opportunityFeed],
+  );
+
+  const focusMetaIds = useMemo(() => {
+    if (!focusedOpportunity || !metas) return null;
+    const ids = new Set<string>();
+    if (focusedOpportunity.metaId) {
+      ids.add(focusedOpportunity.metaId);
+    }
+    if (focusedOpportunity.isLaunch && focusedOpportunity.feedId.startsWith("launch:")) {
+      const mint = focusedOpportunity.feedId.slice("launch:".length);
+      for (const m of [...(metas.emerging ?? []), ...metas.forming, ...metas.active]) {
+        if (m.tokens.some((t) => t.mint === mint)) ids.add(m.id);
+        // Same visual cluster as the launch image
+        if (focusedOpportunity.image && m.sampleImages.includes(focusedOpportunity.image)) {
+          ids.add(m.id);
+        }
+      }
+    }
+    // Also match by theme when metaId drifted after a merge/recalc
+    if (focusedOpportunity.metaId || !focusedOpportunity.isLaunch) {
+      const theme = focusedOpportunity.theme.toLowerCase();
+      for (const m of [...(metas.emerging ?? []), ...metas.forming, ...metas.active]) {
+        if (m.id === focusedOpportunity.metaId) continue;
+        const mt = m.theme.toLowerCase();
+        if (mt === theme || mt.includes(theme) || theme.includes(mt.split("—")[0]!.trim())) {
+          if (m.launchCount >= 2) ids.add(m.id);
+        }
+      }
+    }
+    return ids;
+  }, [focusedOpportunity, metas]);
+
+  const toggleOpportunityFocus = (ev: TimelineEvent) => {
+    setFocusOppId((prev) => (prev === ev.feedId ? null : ev.feedId));
+  };
+
   const opportunityFeedItems = useMemo(
     () => opportunityFeed.map((ev) => ({
       ...ev,
@@ -618,7 +664,10 @@ export default function NarraDashboard({
                       type="button"
                       className={cls}
                       title={`${s.label}: ${tokenCount} tokens — ${s.description}`}
-                      onClick={() => setStageFilter((prev) => (prev === s.id ? null : s.id))}
+                      onClick={() => {
+                        setStageFilter((prev) => (prev === s.id ? null : s.id));
+                        setFocusOppId(null);
+                      }}
                     >
                       <span className="opp-badge stage-step-badge">{s.label.toUpperCase()}</span>
                       <div className="step-count">{tokenCount}</div>
@@ -647,6 +696,8 @@ export default function NarraDashboard({
                       <OpportunityFeedCard
                         ev={ev}
                         flash={flashKeys.has(ev.feedId)}
+                        selected={focusOppId === ev.feedId}
+                        onSelect={toggleOpportunityFocus}
                       />
                     )}
                   />
@@ -673,6 +724,8 @@ export default function NarraDashboard({
                         heatIntensity={heatIntensities.get(m.id) ?? 0}
                         surging={surging.has(m.id)}
                         prevSnapshot={prevSnapshots.get(m.id)}
+                        focusHit={!!focusMetaIds?.has(m.id)}
+                        focusDimmed={!!focusMetaIds && !focusMetaIds.has(m.id)}
                         onHover={showMetaHover}
                         onHoverEnd={hideHover}
                       />
@@ -700,6 +753,8 @@ export default function NarraDashboard({
                         heatIntensity={heatIntensities.get(m.id) ?? 0}
                         surging={surging.has(m.id)}
                         prevSnapshot={prevSnapshots.get(m.id)}
+                        focusHit={!!focusMetaIds?.has(m.id)}
+                        focusDimmed={!!focusMetaIds && !focusMetaIds.has(m.id)}
                         onHover={showMetaHover}
                         onHoverEnd={hideHover}
                       />
