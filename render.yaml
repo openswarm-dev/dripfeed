@@ -30,7 +30,7 @@ services:
     name: drip-frontend
     runtime: node
     rootDir: drip-frontend
-    buildCommand: npm install --include=dev && npm run build
+    buildCommand: cd ../betttr-radar && npm install --include=dev && cd ../drip-frontend && npm install --include=dev && npm run build
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
@@ -38,9 +38,21 @@ services:
       - key: NEXT_PUBLIC_API_URL
         sync: false
       - key: RADAR_API_URL
-        sync: false          # betttr-radar service URL
-      - key: NEXT_PUBLIC_SOLANA_RPC
+        sync: false          # optional external radar; leave unset to bundle betttr-radar in frontend
+      - key: BETTTR_GEYSER
+        value: "true"
+      - key: SOLANA_RPC_URL
         sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: GEYSER_ENDPOINT
+        value: http://grpc-fra1-burst.erpc.global
+      - key: TWEETSTREAM_API_KEY
+        sync: false
+      - key: TWEETSTREAM_WS_URL
+        value: wss://ws-global.tweetstream.io/ws
+      - key: TWEETSTREAM_ACCOUNTS
+        value: elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain
 
   # ── betttr-radar (meta radar engine) ─────────────────────────────────────
   - type: web

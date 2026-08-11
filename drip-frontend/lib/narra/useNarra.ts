@@ -158,8 +158,21 @@ export function useNarra() {
 
     const fallback = setTimeout(() => setLoaderDone(true), 6000);
 
+    // Poll report as backup when SSE is flaky (common behind proxies)
+    const poll = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
+        if (!res.ok) return;
+        const report: NarraReport = await res.json();
+        if (!report.error) setState(reportToState(report));
+      } catch {
+        /* ignore */
+      }
+    }, 8000);
+
     return () => {
       clearTimeout(fallback);
+      clearInterval(poll);
       es.close();
       esRef.current = null;
     };

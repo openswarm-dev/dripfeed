@@ -14,7 +14,10 @@ export async function GET() {
     });
   } catch {
     return NextResponse.json(
-      { error: "Radar service unavailable. Deploy betttr-radar on Railway." },
+      {
+        error:
+          "Radar service unavailable. On Railway, redeploy drip-frontend (bundles betttr-radar) or set RADAR_API_URL to a running radar service.",
+      },
       { status: 503 },
     );
   }

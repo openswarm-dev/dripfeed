@@ -32,7 +32,10 @@ export const config = {
   scanDays: parseInt(process.env.SCAN_DAYS || '3', 10),
   maxSignaturePages: parseInt(process.env.MAX_SIGNATURE_PAGES || '80', 10),
   enrichConcurrency: parseInt(process.env.ENRICH_CONCURRENCY || '8', 10),
-  port: parseInt(process.env.PORT || process.env.BETTTR_RADAR_PORT || process.env.NARRA_PORT || '3950', 10),
+  port: parseInt(
+    process.env.BETTTR_RADAR_PORT || process.env.NARRA_PORT || process.env.PORT || '3950',
+    10,
+  ),
   geyserEnabled: process.env.BETTTR_GEYSER === 'true' || process.env.NARRA_GEYSER === 'true' || process.env.GEYSER_ENABLED === 'true',
   tweetstreamApiKey: process.env.TWEETSTREAM_API_KEY?.trim() || '',
   tweetstreamWsUrl: process.env.TWEETSTREAM_WS_URL?.trim() || 'wss://ws-global.tweetstream.io/ws',
