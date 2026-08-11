@@ -64,14 +64,11 @@ export const config = {
     10,
   ),
   geyserEnabled: process.env.BETTTR_GEYSER === 'true' || process.env.NARRA_GEYSER === 'true' || process.env.GEYSER_ENABLED === 'true',
-  /** Poll pump.fun creates over HTTP RPC when gRPC Geyser is blocked (Railway egress, etc.). */
+  /** Poll pump.fun creates over HTTP RPC — only when explicitly enabled. */
   rpcPollMode: (() => {
     const raw = process.env.GEYSER_RPC_POLL?.trim().toLowerCase();
     if (raw === 'true' || raw === 'only') return 'only' as const;
-    if (raw === 'false' || raw === 'off') return 'off' as const;
     if (raw === 'backup') return 'backup' as const;
-    // Default on Railway: run poll alongside geyser (egress IP can rotate between deploys)
-    if (process.env.RAILWAY_ENVIRONMENT) return 'backup' as const;
     return 'off' as const;
   })(),
   tweetstreamApiKey: process.env.TWEETSTREAM_API_KEY?.trim() || '',

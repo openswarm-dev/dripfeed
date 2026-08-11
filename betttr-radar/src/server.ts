@@ -32,7 +32,6 @@ async function logOutboundIp() {
     const data = await res.json() as { ip?: string };
     if (data.ip) {
       console.log(`  Railway egress IP: ${data.ip}`);
-      console.log(`  Whitelist ${data.ip} (or 152.55.177.0/24) in ERPC for Geyser gRPC`);
     }
   } catch {
     /* non-fatal */
