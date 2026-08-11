@@ -307,6 +307,58 @@ function accountKeysFromTx(tx: any): string[] {
   return keys;
 }
 
+function findCreateKindFromInstructions(
+  message: any,
+  accountKeys: string[],
+): 'v1' | 'v2' | null {
+  const instructions: any[] = message?.instructions ?? message?.compiledInstructions ?? [];
+  for (const ix of instructions) {
+    const programId = accountKeys[ix.programIdIndex];
+    if (programId !== PUMP_PROGRAM) continue;
+    const data = decodeIxData(ix.data);
+    if (!data || data.length < 8) continue;
+    const disc = data.subarray(0, 8);
+    if (disc.equals(CREATE_V2_DISC)) return 'v2';
+    if (disc.equals(CREATE_V1_DISC)) return 'v1';
+  }
+  return null;
+}
+
+function findCreateKindFromTx(txInfo: any): 'v1' | 'v2' | null {
+  try {
+    const parsed = txEncode.encode(txInfo, txEncode.encoding.Json, 0, false) as any;
+    const message = parsed?.transaction?.message;
+    if (!message) return null;
+
+    const accountKeys: string[] = (message.accountKeys ?? []).map((k: unknown) =>
+      typeof k === 'string' ? k : (k as { pubkey?: string })?.pubkey ?? String(k),
+    );
+    const loaded = message.loadedAddresses;
+    if (loaded) {
+      accountKeys.push(...(loaded.writable ?? []), ...(loaded.readonly ?? []));
+    }
+
+    const top = findCreateKindFromInstructions(message, accountKeys);
+    if (top) return top;
+
+    const innerGroups: any[] = parsed.meta?.innerInstructions ?? [];
+    for (const group of innerGroups) {
+      for (const ix of group.instructions ?? []) {
+        const programId = accountKeys[ix.programIdIndex];
+        if (programId !== PUMP_PROGRAM) continue;
+        const data = decodeIxData(ix.data);
+        if (!data || data.length < 8) continue;
+        const disc = data.subarray(0, 8);
+        if (disc.equals(CREATE_V2_DISC)) return 'v2';
+        if (disc.equals(CREATE_V1_DISC)) return 'v1';
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /** Parse a Geyser transaction update for any Pump.fun create. */
 export function parsePumpCreateGeyser(transactionUpdate: any): Omit<ParsedLaunch, 'blockTime'> | null {
   const slot = Number(transactionUpdate?.slot);
@@ -318,19 +370,25 @@ export function parsePumpCreateGeyser(transactionUpdate: any): Omit<ParsedLaunch
   const parsed =
     parseEncodedGeyserTx(txInfo) ?? parseRawGeyserTx(transactionUpdate);
   if (!parsed) return null;
-  if (!isPumpCreate(parsed.logs)) return null;
+
+  // Prefer log markers, but also detect Create/CreateV2 via instruction discriminators.
+  // Some geyser providers omit or truncate logMessages — without this we silently drop creates.
+  const createKind = findCreateKindFromTx(txInfo);
+  const logsSayCreate = isPumpCreate(parsed.logs);
+  if (!logsSayCreate && !createKind) return null;
 
   const mint = extractMint(parsed.keys, parsed.creator);
   if (!mint) return null;
 
   const meta = parsePumpMetadataFromTx(txInfo);
+  const isV2 = createKind === 'v2' || isCreateV2(parsed.logs);
 
   return {
     signature: parsed.signature,
     slot,
     mint,
     creator: parsed.creator,
-    isCreateV2: isCreateV2(parsed.logs),
+    isCreateV2: isV2,
     name: meta.name,
     symbol: meta.symbol,
     metadataUri: meta.metadataUri,
