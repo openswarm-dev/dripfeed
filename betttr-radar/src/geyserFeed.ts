@@ -10,9 +10,14 @@ import {
   updateLaunch,
   recordGeyserPumpTx,
   recordCreateParsed,
+  getState,
 } from './liveStore.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** If pump txs keep flowing but no create parses for this long, force ERPC reconnect. */
+const STALE_CREATE_MS = 90_000;
+const WATCHDOG_MS = 15_000;
 
 function pingReply(id = 1) {
   return {
@@ -55,17 +60,24 @@ function minimalLaunch(parsed: {
 
 export async function startGeyserFeed() {
   const seen = new Set<string>();
-  console.log(`  Geyser live: ${config.geyserEndpoint}`);
-
-  const client = new Client(config.geyserEndpoint, config.geyserToken, {
-    'grpc.keepalive_time_ms': 15_000,
-    'grpc.keepalive_timeout_ms': 5_000,
-    'grpc.keepalive_permit_without_calls': 1,
-  });
+  console.log(`  Geyser live (ERPC): ${config.geyserEndpoint}`);
 
   while (true) {
+    let stream: any = null;
+    let lastCreateAt = Date.now();
+    let lastPumpTxAt = Date.now();
+    let pumpTxSinceCreate = 0;
+    let closed = false;
+
     try {
-      const stream = await client.subscribeOnce(
+      const client = new Client(config.geyserEndpoint, config.geyserToken, {
+        'grpc.keepalive_time_ms': 10_000,
+        'grpc.keepalive_timeout_ms': 5_000,
+        'grpc.keepalive_permit_without_calls': 1,
+        'grpc.http2.min_time_between_pings_ms': 10_000,
+      });
+
+      stream = await client.subscribeOnce(
         {},
         {},
         {
@@ -85,8 +97,26 @@ export async function startGeyserFeed() {
         [],
       );
 
-      console.log('  Geyser connected — streaming all pump.fun creates\n');
+      console.log('  ERPC Geyser connected — streaming pump.fun creates\n');
       setGeyserConnected(true);
+
+      const watchdog = setInterval(() => {
+        if (closed) return;
+        const silentCreates = Date.now() - lastCreateAt;
+        const recentPump = Date.now() - lastPumpTxAt < 30_000;
+        // Stream is alive (pump txs) but no creates parsed → likely stale ERPC filter/cursor.
+        if (recentPump && silentCreates >= STALE_CREATE_MS && pumpTxSinceCreate >= 40) {
+          console.warn(
+            `[geyser] ERPC stale: ${Math.round(silentCreates / 1000)}s without creates ` +
+              `(${pumpTxSinceCreate} pump txs) — forcing reconnect`,
+          );
+          try {
+            stream?.destroy?.() || stream?.end?.() || stream?.cancel?.();
+          } catch {
+            /* ignore */
+          }
+        }
+      }, WATCHDOG_MS);
 
       stream.on('data', (data: any) => {
         if (data?.ping != null) {
@@ -99,12 +129,22 @@ export async function startGeyserFeed() {
         if (!txWrap?.transaction) return;
 
         recordGeyserPumpTx();
+        lastPumpTxAt = Date.now();
+        pumpTxSinceCreate += 1;
 
         const parsed = parsePumpCreateGeyser(txWrap);
         if (!parsed) return;
         recordCreateParsed();
+        lastCreateAt = Date.now();
+        pumpTxSinceCreate = 0;
+
         if (seen.has(parsed.mint)) return;
         seen.add(parsed.mint);
+        // Bound memory — keep recent mints only.
+        if (seen.size > 20_000) {
+          const drop = [...seen].slice(0, 5_000);
+          for (const m of drop) seen.delete(m);
+        }
 
         const blockTime = Math.floor(Date.now() / 1000);
         const launch = minimalLaunch({ ...parsed, blockTime });
@@ -125,19 +165,39 @@ export async function startGeyserFeed() {
         setGeyserConnected(false);
         const msg = err.message;
         if (msg.includes('PERMISSION_DENIED')) {
-          console.error('Geyser stream error:', msg, '— Helius LaserStream requires a paid plan, or use ERPC with IP whitelist');
+          console.error('ERPC Geyser error:', msg, '— check X_TOKEN / IP whitelist on erpc.global');
         } else if (msg.includes('ETIMEDOUT') || msg.includes('UNAVAILABLE')) {
-          console.error('Geyser stream error:', msg, '— whitelist Railway egress IP in ERPC dashboard');
+          console.error('ERPC Geyser error:', msg, '— endpoint unreachable, retrying');
         } else {
-          console.error('Geyser stream error:', msg);
+          console.error('ERPC Geyser error:', msg);
         }
       });
 
-      await new Promise<void>((resolve) => stream.on('close', resolve));
+      await new Promise<void>((resolve) => {
+        stream.on('close', () => {
+          closed = true;
+          clearInterval(watchdog);
+          resolve();
+        });
+      });
     } catch (err: any) {
       setGeyserConnected(false);
-      console.error('Geyser reconnect in 3s:', err?.message ?? err);
+      console.error('ERPC Geyser reconnect in 3s:', err?.message ?? err);
       await sleep(3000);
+    } finally {
+      setGeyserConnected(false);
+      try {
+        stream?.destroy?.() || stream?.end?.();
+      } catch {
+        /* ignore */
+      }
     }
+
+    // Brief pause before resubscribe so we don't spin.
+    const stats = getState().geyserStats;
+    console.log(
+      `[geyser] resubscribing ERPC (seen ${stats.pumpTxSeen} pump txs, ${stats.createsStored} creates)…`,
+    );
+    await sleep(1500);
   }
 }

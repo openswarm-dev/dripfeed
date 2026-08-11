@@ -37,16 +37,23 @@ function resolveGeyserEndpoint(): string {
   return 'http://grpc-fra1-burst.erpc.global';
 }
 
-/** ERPC gRPC often uses the same api-key as the HTTP RPC URL when X_TOKEN is unset. */
+/** ERPC gRPC auth — only use X_TOKEN / ERPC token, never a Helius key. */
 function resolveGeyserToken(endpoint: string): string | undefined {
-  const explicit = process.env.X_TOKEN?.trim();
+  const explicit = process.env.X_TOKEN?.trim() || process.env.ERPC_X_TOKEN?.trim();
   if (explicit) return explicit;
   if (endpoint.includes('helius')) {
     return process.env.HELIUS_API_KEY?.trim() || undefined;
   }
+  // ERPC: prefer dedicated token; do not borrow Helius api-key from SOLANA_RPC_URL.
+  const erpcKey = process.env.ERPC_API_KEY?.trim();
+  if (erpcKey) return erpcKey;
   const rpc = process.env.SOLANA_RPC_URL?.trim() || '';
-  const match = rpc.match(/[?&]api-key=([^&]+)/i);
-  return match?.[1];
+  // Only reuse RPC api-key when the RPC host is also erpc.
+  if (/erpc\.global|erpc\./i.test(rpc)) {
+    const match = rpc.match(/[?&]api-key=([^&]+)/i);
+    return match?.[1];
+  }
+  return undefined;
 }
 
 const geyserEndpoint = resolveGeyserEndpoint();
