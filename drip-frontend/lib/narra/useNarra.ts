@@ -48,16 +48,73 @@ type PartialPayload = Partial<NarraReport & {
   liveSparks?: number;
 }>;
 
+/** Never let empty/zero polls erase known-good metrics. */
+function keepMetric(next: number | undefined, prev: number | undefined): number | undefined {
+  if (next == null) return prev;
+  if (next <= 0 && prev != null && prev > 0) return prev;
+  return next;
+}
+
+function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
+  return {
+    ...prev,
+    ...next,
+    name: next.name ?? prev.name,
+    symbol: next.symbol ?? prev.symbol,
+    image: next.image ?? prev.image,
+    description: next.description ?? prev.description,
+    marketCapUsd: keepMetric(next.marketCapUsd, prev.marketCapUsd),
+    volumeUsd24h: keepMetric(next.volumeUsd24h, prev.volumeUsd24h),
+    volumeUsd1h: keepMetric(next.volumeUsd1h, prev.volumeUsd1h),
+    txns24h: keepMetric(next.txns24h, prev.txns24h),
+    holderCount: keepMetric(next.holderCount, prev.holderCount),
+    bondingProgressPct: next.bondingProgressPct ?? prev.bondingProgressPct,
+    bonded: next.bonded ?? prev.bonded,
+    volumeUpdatedAt: next.volumeUpdatedAt ?? prev.volumeUpdatedAt,
+    marketUpdatedAt: next.marketUpdatedAt ?? prev.marketUpdatedAt,
+  };
+}
+
 function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
   const byMint = new Map<string, LaunchRecord>();
   for (const l of existing) byMint.set(l.mint, l);
   for (const l of incoming) {
     const prev = byMint.get(l.mint);
-    byMint.set(l.mint, prev ? { ...prev, ...l } : l);
+    byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
   return [...byMint.values()]
     .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
     .slice(0, 5000);
+}
+
+function mergeMetas(prev: MetaDashboard | null, next: MetaDashboard | null | undefined): MetaDashboard | null {
+  if (!next) return prev;
+  if (!prev) return next;
+
+  const prevById = new Map(
+    [...(prev.emerging ?? []), ...prev.forming, ...prev.active, ...(prev.fading ?? [])].map((m) => [m.id, m]),
+  );
+
+  const patch = (m: (typeof next.active)[number]) => {
+    const old = prevById.get(m.id);
+    if (!old) return m;
+    return {
+      ...m,
+      totalVolumeUsd1h: keepMetric(m.totalVolumeUsd1h, old.totalVolumeUsd1h) ?? m.totalVolumeUsd1h,
+      totalVolumeUsd24h: keepMetric(m.totalVolumeUsd24h, old.totalVolumeUsd24h) ?? m.totalVolumeUsd24h,
+      totalTxns24h: keepMetric(m.totalTxns24h, old.totalTxns24h) ?? m.totalTxns24h,
+      topMarketCapUsd: keepMetric(m.topMarketCapUsd, old.topMarketCapUsd) ?? m.topMarketCapUsd,
+      totalMarketCapUsd: keepMetric(m.totalMarketCapUsd, old.totalMarketCapUsd) ?? m.totalMarketCapUsd,
+    };
+  };
+
+  return {
+    ...next,
+    emerging: (next.emerging ?? []).map(patch),
+    forming: next.forming.map(patch),
+    active: next.active.map(patch),
+    fading: (next.fading ?? []).map(patch),
+  };
 }
 
 function mergePayload(base: NarraState, data: PartialPayload): NarraState {
@@ -87,7 +144,7 @@ function mergePayload(base: NarraState, data: PartialPayload): NarraState {
   };
 
   return {
-    metas: data.metas ?? base.metas,
+    metas: mergeMetas(base.metas, data.metas),
     launches,
     sparks,
     geyserStats: data.geyserStats ?? base.geyserStats,

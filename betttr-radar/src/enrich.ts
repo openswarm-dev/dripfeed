@@ -65,7 +65,10 @@ async function fetchDexScreener(mint: string): Promise<Partial<LaunchRecord>> {
       marketCapUsd: pair.marketCap ?? pair.fdv,
       volumeUsd24h: pair.volume?.h24,
       volumeUsd1h: pair.volume?.h1,
-      txns24h: (pair.txns?.h24?.buys ?? 0) + (pair.txns?.h24?.sells ?? 0),
+      txns24h:
+        pair.txns?.h24?.buys != null || pair.txns?.h24?.sells != null
+          ? (pair.txns?.h24?.buys ?? 0) + (pair.txns?.h24?.sells ?? 0)
+          : undefined,
       volumeUpdatedAt: Math.floor(Date.now() / 1000),
     };
   } catch {

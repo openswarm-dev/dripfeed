@@ -51,11 +51,38 @@ function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): Laun
   for (const l of incoming) byMint.set(l.mint, l);
   for (const l of existing) {
     const prev = byMint.get(l.mint);
-    byMint.set(l.mint, prev ? { ...prev, ...l } : l);
+    byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
   return [...byMint.values()]
     .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
     .slice(0, 5000);
+}
+
+/** Prefer newer fields, but never let empty/zero polls wipe known-good metrics. */
+function keepMetric(next: number | undefined, prev: number | undefined): number | undefined {
+  if (next == null) return prev;
+  if (next <= 0 && prev != null && prev > 0) return prev;
+  return next;
+}
+
+function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
+  return {
+    ...prev,
+    ...next,
+    name: next.name ?? prev.name,
+    symbol: next.symbol ?? prev.symbol,
+    image: next.image ?? prev.image,
+    description: next.description ?? prev.description,
+    marketCapUsd: keepMetric(next.marketCapUsd, prev.marketCapUsd),
+    volumeUsd24h: keepMetric(next.volumeUsd24h, prev.volumeUsd24h),
+    volumeUsd1h: keepMetric(next.volumeUsd1h, prev.volumeUsd1h),
+    txns24h: keepMetric(next.txns24h, prev.txns24h),
+    holderCount: keepMetric(next.holderCount, prev.holderCount),
+    bondingProgressPct: next.bondingProgressPct ?? prev.bondingProgressPct,
+    bonded: next.bonded ?? prev.bonded,
+    volumeUpdatedAt: next.volumeUpdatedAt ?? prev.volumeUpdatedAt,
+    marketUpdatedAt: next.marketUpdatedAt ?? prev.marketUpdatedAt,
+  };
 }
 
 function persistCurrent() {
@@ -193,7 +220,7 @@ export function updateLaunch(launch: LaunchRecord) {
   if (idx < 0) return;
 
   const launches = [...current.launches];
-  launches[idx] = { ...launches[idx], ...launch };
+  launches[idx] = mergeLaunchRecord(launches[idx]!, launch);
   state = buildState(launches, current.sparks, current.liveLaunches);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
@@ -284,21 +311,21 @@ export async function refreshLaunchVolumes() {
       const mkt = markets.get(l.mint);
       if (!vol && !mkt) return l;
       changed = true;
-      return {
+      return mergeLaunchRecord(l, {
         ...l,
-        name: l.name ?? mkt?.name,
-        symbol: l.symbol ?? mkt?.symbol,
-        image: l.image ?? mkt?.image,
-        volumeUsd24h: vol?.volumeUsd24h ?? l.volumeUsd24h,
-        volumeUsd1h: vol?.volumeUsd1h ?? l.volumeUsd1h,
-        txns24h: vol?.txns24h ?? l.txns24h,
-        volumeUpdatedAt: vol?.volumeUpdatedAt ?? l.volumeUpdatedAt,
-        marketCapUsd: mkt?.marketCapUsd ?? l.marketCapUsd,
-        bonded: mkt?.bonded ?? l.bonded,
-        holderCount: mkt?.holderCount ?? l.holderCount,
-        bondingProgressPct: mkt?.bondingProgressPct ?? l.bondingProgressPct,
-        marketUpdatedAt: mkt?.updatedAt ?? l.marketUpdatedAt,
-      };
+        name: mkt?.name,
+        symbol: mkt?.symbol,
+        image: mkt?.image,
+        volumeUsd24h: vol?.volumeUsd24h,
+        volumeUsd1h: vol?.volumeUsd1h,
+        txns24h: vol?.txns24h,
+        volumeUpdatedAt: vol?.volumeUpdatedAt,
+        marketCapUsd: mkt?.marketCapUsd,
+        bonded: mkt?.bonded,
+        holderCount: mkt?.holderCount,
+        bondingProgressPct: mkt?.bondingProgressPct,
+        marketUpdatedAt: mkt?.updatedAt,
+      });
     });
 
     if (changed) {

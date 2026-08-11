@@ -35,7 +35,10 @@ export async function fetchVolumeMetrics(mint: string): Promise<VolumeMetrics | 
       volumeUsd24h: pair.volume?.h24 ?? pair.volume?.h6,
       volumeUsd1h: pair.volume?.h1,
       volumeUsd6h: pair.volume?.h6,
-      txns24h: (pair.txns?.h24?.buys ?? 0) + (pair.txns?.h24?.sells ?? 0),
+      txns24h:
+        pair.txns?.h24?.buys != null || pair.txns?.h24?.sells != null
+          ? (pair.txns?.h24?.buys ?? 0) + (pair.txns?.h24?.sells ?? 0)
+          : undefined,
       buys24h: pair.txns?.h24?.buys,
       sells24h: pair.txns?.h24?.sells,
       priceChange1h: pair.priceChange?.h1,
