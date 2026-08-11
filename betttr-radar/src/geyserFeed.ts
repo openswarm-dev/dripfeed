@@ -58,6 +58,35 @@ function minimalLaunch(parsed: {
   };
 }
 
+function cheapLogs(txWrap: any): string[] {
+  return (
+    txWrap?.transaction?.meta?.logMessages
+    ?? txWrap?.transaction?.meta?.log_messages
+    ?? txWrap?.meta?.logMessages
+    ?? txWrap?.meta?.log_messages
+    ?? []
+  );
+}
+
+function looksLikeNonCreate(logs: string[]): boolean {
+  if (!logs.length) return false;
+  const hasCreate = logs.some(
+    (l) =>
+      l.includes('Instruction: Create')
+      || l.includes('Instruction: CreateV2')
+      || l.includes('InitializeMint2'),
+  );
+  if (hasCreate) return false;
+  return logs.some(
+    (l) =>
+      l.includes('Instruction: Buy')
+      || l.includes('Instruction: Sell')
+      || l.includes('Instruction: GetFees')
+      || l.includes('BuyProfile')
+      || l.includes('CreateIdempotent'),
+  );
+}
+
 export async function startGeyserFeed() {
   const seen = new Set<string>();
   console.log(`  Geyser live (ERPC): ${config.geyserEndpoint}`);
@@ -104,7 +133,6 @@ export async function startGeyserFeed() {
         if (closed) return;
         const silentCreates = Date.now() - lastCreateAt;
         const recentPump = Date.now() - lastPumpTxAt < 30_000;
-        // Stream is alive (pump txs) but no creates parsed → likely stale ERPC filter/cursor.
         if (recentPump && silentCreates >= STALE_CREATE_MS && pumpTxSinceCreate >= 40) {
           console.warn(
             `[geyser] ERPC stale: ${Math.round(silentCreates / 1000)}s without creates ` +
@@ -132,6 +160,10 @@ export async function startGeyserFeed() {
         lastPumpTxAt = Date.now();
         pumpTxSinceCreate += 1;
 
+        // Cheap reject: ignore buys/sells before any tx decode work.
+        const logs = cheapLogs(txWrap);
+        if (looksLikeNonCreate(logs)) return;
+
         const parsed = parsePumpCreateGeyser(txWrap);
         if (!parsed) return;
         recordCreateParsed();
@@ -140,7 +172,6 @@ export async function startGeyserFeed() {
 
         if (seen.has(parsed.mint)) return;
         seen.add(parsed.mint);
-        // Bound memory — keep recent mints only.
         if (seen.size > 20_000) {
           const drop = [...seen].slice(0, 5_000);
           for (const m of drop) seen.delete(m);

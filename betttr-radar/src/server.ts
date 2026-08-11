@@ -225,11 +225,11 @@ void initLiveStore().then(() => {
     console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
 
     setInterval(heartbeat, 25_000);
-    setInterval(recalcMetas, 10_000);
-    setInterval(() => void refreshLaunchVolumes(), 5_000);
-    setInterval(refreshFromReport, 60_000);
-    setInterval(() => void enrichStaleLaunches(), 4_000);
-    setInterval(() => flushPersist(), 30_000);
+    setInterval(recalcMetas, 20_000);
+    setInterval(() => void refreshLaunchVolumes(), 8_000);
+    setInterval(refreshFromReport, 120_000);
+    setInterval(() => void enrichStaleLaunches(), 6_000);
+    setInterval(() => flushPersist(), 45_000);
 
     if (config.tweetstreamApiKey) {
       await fetchTweetStreamMe();
