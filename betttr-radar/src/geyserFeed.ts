@@ -1,4 +1,4 @@
-import Client, { CommitmentLevel } from '@triton-one/yellowstone-grpc';
+﻿import Client, { CommitmentLevel } from '@triton-one/yellowstone-grpc';
 import { config, PUMP_PROGRAM } from './config.js';
 import { parsePumpCreateGeyser } from './parseCreate.js';
 import { enrichLaunchLive } from './enrich.js';
@@ -10,13 +10,16 @@ import {
   updateLaunch,
   recordGeyserPumpTx,
   recordCreateParsed,
-  hasMint,
+  getState,
 } from './liveStore.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** If pump txs keep flowing but no create parses for this long, force ERPC reconnect. */
-const STALE_CREATE_MS = 90_000;
+
+/** If no pump txs at all for this long, the stream is dead — reconnect. */
+const SILENCE_MS = 60_000;
+/** If pump txs flow but zero creates for this long, something is wrong — reconnect. */
+const STALE_CREATE_MS = 120_000;
 const WATCHDOG_MS = 15_000;
 
 function pingReply(id = 1) {
@@ -58,104 +61,35 @@ function minimalLaunch(parsed: {
   };
 }
 
-function cheapLogs(txWrap: any): string[] {
-  const meta =
-    txWrap?.transaction?.meta
-    ?? txWrap?.meta
-    ?? null;
-  const logs = meta?.logMessages ?? meta?.log_messages ?? [];
-  return Array.isArray(logs) ? logs : [];
-}
+// CREATE discriminators from pump.fun IDL
+const CREATE_V1_DISC = Buffer.from([24, 30, 200, 40, 5, 28, 7, 119]);
+const CREATE_V2_DISC = Buffer.from([214, 144, 76, 236, 95, 139, 49, 180]);
 
-const CREATE_V2_DISC = Buffer.from([0xd6, 0x90, 0x4c, 0xec, 0x5f, 0x8b, 0x31, 0xb4]);
-const CREATE_V1_DISC = Buffer.from([0x18, 0x1e, 0xc8, 0x28, 0x05, 0x1c, 0x07, 0x77]);
-
-function decodeIxDataCheap(raw: unknown): Buffer | null {
-  if (!raw) return null;
-  if (raw instanceof Uint8Array) return Buffer.from(raw);
-  if (Array.isArray(raw)) return Buffer.from(raw as number[]);
-  if (typeof raw === 'string') {
-    try {
-      return Buffer.from(raw, 'base64');
-    } catch {
-      return null;
-    }
+/**
+ * Pre-filter: check for create discriminator in raw instruction bytes.
+ * This is cheap (no JSON serialisation) and eliminates >95% of buys/sells.
+ * We deliberately do NOT gate on postTokenBalances here — some creates may
+ * have it empty at PROCESSED commitment before token accounts are updated.
+ */
+function looksLikeCreate(txWrap: any): boolean {
+  const message = txWrap?.transaction?.transaction?.message;
+  if (!message) return false;
+  const meta = txWrap?.transaction?.meta;
+  const innerGroups: any[] = meta?.innerInstructions ?? meta?.inner_instructions ?? [];
+  const allIxs = [
+    ...(message.instructions ?? []),
+    ...innerGroups.flatMap((g: any) => g.instructions ?? []),
+  ];
+  for (const ix of allIxs) {
+    if (!ix.data) continue;
+    const buf = ix.data instanceof Uint8Array ? ix.data
+      : Buffer.isBuffer(ix.data) ? ix.data
+      : Array.isArray(ix.data) ? Uint8Array.from(ix.data as number[])
+      : null;
+    if (!buf || buf.length < 8) continue;
+    const disc = Buffer.from(buf.subarray(0, 8));
+    if (disc.equals(CREATE_V1_DISC) || disc.equals(CREATE_V2_DISC)) return true;
   }
-  return null;
-}
-
-/** Scan outer + inner ix bytes for pump create discriminators. */
-function rawHasCreateDisc(txWrap: any): boolean {
-  const buffers: Buffer[] = [];
-  const pushIx = (ix: any) => {
-    const data = decodeIxDataCheap(ix?.data);
-    if (data && data.length >= 8) buffers.push(data);
-  };
-
-  const message =
-    txWrap?.transaction?.transaction?.message
-    ?? txWrap?.transaction?.message
-    ?? txWrap?.message;
-  const outer = message?.instructions ?? message?.compiledInstructions ?? [];
-  if (Array.isArray(outer)) {
-    for (const ix of outer) pushIx(ix);
-  }
-
-  const meta =
-    txWrap?.transaction?.meta
-    ?? txWrap?.transaction?.transaction?.meta
-    ?? txWrap?.meta
-    ?? null;
-  const inners = meta?.innerInstructions ?? meta?.inner_instructions ?? [];
-  if (Array.isArray(inners)) {
-    for (const group of inners) {
-      const groupIxs = group?.instructions ?? [];
-      if (!Array.isArray(groupIxs)) continue;
-      for (const ix of groupIxs) pushIx(ix);
-    }
-  }
-
-  for (const data of buffers) {
-    const disc = data.subarray(0, 8);
-    if (disc.equals(CREATE_V2_DISC) || disc.equals(CREATE_V1_DISC)) return true;
-  }
-  return false;
-}
-
-let geyserRejects = 0;
-let geyserFullParses = 0;
-let geyserCreates = 0;
-let geyserParseNull = 0;
-setInterval(() => {
-  if (!geyserRejects && !geyserFullParses) return;
-  console.log(
-    `[geyser] 10s: reject=${geyserRejects} parse=${geyserFullParses} null=${geyserParseNull} creates=${geyserCreates}`,
-  );
-  geyserRejects = 0;
-  geyserFullParses = 0;
-  geyserParseNull = 0;
-  geyserCreates = 0;
-}, 10_000);
-
-function shouldFullParse(txWrap: any): boolean {
-  const logs = cheapLogs(txWrap);
-  if (logs.some((l) => l.includes('Instruction: CreateV2'))) return true;
-  if (
-    logs.some(
-      (l) =>
-        l.includes('Instruction: Create')
-        && !l.includes('CreateV2')
-        && !l.includes('CreateIdempotent')
-        && !l.includes('CreateMetadataAccount'),
-    )
-  ) {
-    return true;
-  }
-  // Create disc in outer/inner ixs (create+buy when Create logs are truncated).
-  if (rawHasCreateDisc(txWrap)) return true;
-  // Do NOT full-parse every logless buy — that starved the event loop and
-  // frozen gap-fill / live creates. Empty logs: only try when disc scan missed
-  // due to exotic encoding (cheap no-op if no create).
   return false;
 }
 
@@ -198,25 +132,18 @@ export async function startGeyserFeed() {
         [],
       );
 
-      console.log('  ERPC Geyser connected — streaming pump.fun creates\n');
+      console.log('  ERPC Geyser connected ÔÇö streaming pump.fun creates\n');
       setGeyserConnected(true);
 
+      let forceReconnect: (() => void) | null = null;
       const watchdog = setInterval(() => {
         if (closed) return;
-        const now = Date.now();
-        const silentPump = now - lastPumpTxAt;
-        const silentCreates = now - lastCreateAt;
-        // Stream went quiet entirely — reconnect (old watchdog only fired when
-        // buys kept flowing, so a dead socket never recovered).
-        if (silentPump >= 20_000) {
-          console.warn(
-            `[geyser] ERPC quiet: ${Math.round(silentPump / 1000)}s without pump txs — forcing reconnect`,
-          );
-          try {
-            stream?.destroy?.() || stream?.end?.() || stream?.cancel?.();
-          } catch {
-            /* ignore */
-          }
+        const silentPump = Date.now() - lastPumpTxAt;
+        const silentCreates = Date.now() - lastCreateAt;
+        if (silentPump >= SILENCE_MS) {
+          console.warn(`[geyser] ${Math.round(silentPump / 1000)}s no pump txs — stream dead, reconnecting`);
+          try { stream?.destroy?.(); } catch { /* ignore */ }
+          forceReconnect?.();
           return;
         }
         if (silentCreates >= STALE_CREATE_MS && pumpTxSinceCreate >= 40) {
@@ -224,11 +151,8 @@ export async function startGeyserFeed() {
             `[geyser] ERPC stale: ${Math.round(silentCreates / 1000)}s without creates ` +
               `(${pumpTxSinceCreate} pump txs) — forcing reconnect`,
           );
-          try {
-            stream?.destroy?.() || stream?.end?.() || stream?.cancel?.();
-          } catch {
-            /* ignore */
-          }
+          try { stream?.destroy?.(); } catch { /* ignore */ }
+          forceReconnect?.();
         }
       }, WATCHDOG_MS);
 
@@ -246,95 +170,61 @@ export async function startGeyserFeed() {
         lastPumpTxAt = Date.now();
         pumpTxSinceCreate += 1;
 
-        // Cheap reject: only full-parse creates (logs or raw create discriminator).
-        if (!shouldFullParse(txWrap)) {
-          geyserRejects += 1;
-          return;
-        }
+        // Fast pre-filter: skip txs that definitely aren't creates
+        if (!looksLikeCreate(txWrap)) return;
 
-        geyserFullParses += 1;
         const parsed = parsePumpCreateGeyser(txWrap);
-        if (!parsed) {
-          geyserParseNull += 1;
-          return;
-        }
+        if (!parsed) return;
         recordCreateParsed();
-        geyserCreates += 1;
         lastCreateAt = Date.now();
         pumpTxSinceCreate = 0;
 
-        const already = seen.has(parsed.mint) || hasMint(parsed.mint);
-        if (!already) {
-          seen.add(parsed.mint);
-          if (seen.size > 20_000) {
-            const drop = [...seen].slice(0, 5_000);
-            for (const m of drop) seen.delete(m);
-          }
-
-          const slot = Number(txWrap?.slot ?? parsed.slot ?? 0);
-          const rawBt =
-            txWrap?.blockTime
-            ?? txWrap?.block_time
-            ?? txWrap?.transaction?.blockTime
-            ?? txWrap?.transaction?.block_time
-            ?? null;
-          let blockTime = Math.floor(Date.now() / 1000);
-          if (typeof rawBt === 'number' && Number.isFinite(rawBt) && rawBt > 1_000_000_000) {
-            blockTime = rawBt > 1e12 ? Math.floor(rawBt / 1000) : Math.floor(rawBt);
-          }
-          const launch = minimalLaunch({
-            ...parsed,
-            slot: Number.isFinite(slot) ? slot : parsed.slot,
-            blockTime,
-          });
-          addLaunch(launch);
-
-          console.log(
-            `[live] ${launch.isCreateV2 ? 'V2' : 'V1'} ${launch.symbol ?? launch.name ?? launch.mint.slice(0, 8)}…`,
-          );
-
-          // Only enrich when identity/image is missing — unbounded IPFS was
-          // starving gap-fill and making us lag Axiom/pump.fun.
-          const needsEnrich = !(launch.name && launch.symbol && launch.image);
-          if (needsEnrich) {
-            void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
-              updateLaunch(partial, { soft: true });
-            }).then((enriched) => {
-              updateLaunch(enriched, { soft: true });
-            }).catch(() => {});
-          }
-          return;
+        if (seen.has(parsed.mint)) return;
+        seen.add(parsed.mint);
+        if (seen.size > 20_000) {
+          const drop = [...seen].slice(0, 5_000);
+          for (const m of drop) seen.delete(m);
         }
 
-        // Already stored: light patch only if we decoded fresh name/uri.
-        if (parsed.name || parsed.symbol || parsed.metadataUri) {
-          const blockTime = Math.floor(Date.now() / 1000);
-          void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
-            updateLaunch(partial, { soft: true });
-          }).then((enriched) => {
-            updateLaunch(enriched, { soft: true });
-          }).catch(() => {});
-        }
-      });
+        const blockTime = Math.floor(Date.now() / 1000);
+        const launch = minimalLaunch({ ...parsed, blockTime });
+        addLaunch(launch);
 
-      stream.on('error', (err: Error) => {
-        setGeyserConnected(false);
-        const msg = err.message;
-        if (msg.includes('PERMISSION_DENIED')) {
-          console.error('ERPC Geyser error:', msg, '— check X_TOKEN / IP whitelist on erpc.global');
-        } else if (msg.includes('ETIMEDOUT') || msg.includes('UNAVAILABLE')) {
-          console.error('ERPC Geyser error:', msg, '— endpoint unreachable, retrying');
-        } else {
-          console.error('ERPC Geyser error:', msg);
-        }
+        console.log(
+          `[live] ${launch.isCreateV2 ? 'V2' : 'V1'} ${launch.symbol ?? launch.name ?? launch.mint.slice(0, 8)}ÔÇª`,
+        );
+
+        void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
+          updateLaunch(partial, { soft: true });
+        }).then((enriched) => {
+          updateLaunch(enriched);
+        }).catch(() => {});
       });
 
       await new Promise<void>((resolve) => {
-        stream.on('close', () => {
+        const done = () => {
+          if (closed) return;
           closed = true;
           clearInterval(watchdog);
           resolve();
+        };
+        forceReconnect = done;
+
+        stream.on('error', (err: Error) => {
+          setGeyserConnected(false);
+          const msg = err.message;
+          if (msg.includes('PERMISSION_DENIED')) {
+            console.error('ERPC Geyser error:', msg, '— check X_TOKEN / IP whitelist on erpc.global');
+          } else if (msg.includes('ETIMEDOUT') || msg.includes('UNAVAILABLE') || msg.includes('DATA_LOSS')) {
+            console.error('ERPC Geyser error:', msg, '— reconnecting');
+          } else {
+            console.error('ERPC Geyser error:', msg);
+          }
+          done();
         });
+
+        stream.on('close', done);
+        stream.on('end', done);
       });
     } catch (err: any) {
       setGeyserConnected(false);
@@ -350,7 +240,10 @@ export async function startGeyserFeed() {
     }
 
     // Brief pause before resubscribe so we don't spin.
-    console.log('[geyser] resubscribing ERPC…');
+    const stats = getState().geyserStats;
+    console.log(
+      `[geyser] resubscribing ERPC (seen ${stats.pumpTxSeen} pump txs, ${stats.createsStored} creates)ÔÇª`,
+    );
     await sleep(1500);
   }
 }

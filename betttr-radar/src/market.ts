@@ -107,21 +107,33 @@ export async function refreshPumpCoinsForMints(
 
 /**
  * One list call for newest creates — identity only (name/symbol/image).
- * Used to gap-fill ERPC misses without per-mint metrics hammering.
+ * Keeps New Launches aligned with pump.fun / Axiom when Geyser misses.
  */
-export async function fetchRecentPumpCreates(limit = 50): Promise<PumpRecentCreate[]> {
+const PUMP_LIST_HEADERS: Record<string, string> = {
+  Accept: 'application/json',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  Origin: 'https://pump.fun',
+  Referer: 'https://pump.fun/',
+};
+
+async function fetchPumpCoinsOnce(limit: number, timeoutMs: number): Promise<PumpRecentCreate[] | null> {
+  const url =
+    `https://frontend-api-v3.pump.fun/coins?offset=0&limit=${limit}` +
+    `&sort=created_timestamp&order=DESC&includeNsfw=true`;
+  const controller = new AbortController();
+  // Use a slightly longer grace period — event loop busy with Geyser can delay fetch callbacks.
+  const timer = setTimeout(() => controller.abort('pump_list_timeout'), timeoutMs);
   try {
-    const url =
-      `https://frontend-api-v3.pump.fun/coins?offset=0&limit=${limit}` +
-      `&sort=created_timestamp&order=DESC&includeNsfw=true`;
     const res = await fetch(url, {
-      headers: {
-        Accept: 'application/json',
-        'User-Agent': 'Mozilla/5.0 (compatible; BetttrRadar/1.0)',
-      },
-      signal: AbortSignal.timeout(8000),
+      headers: PUMP_LIST_HEADERS,
+      signal: controller.signal,
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.warn(`[sync] pump.fun list HTTP ${res.status}`);
+      return null;
+    }
     const data = (await res.json()) as Array<{
       mint?: string;
       name?: string;
@@ -131,7 +143,7 @@ export async function fetchRecentPumpCreates(limit = 50): Promise<PumpRecentCrea
       creator?: string;
       created_timestamp?: number;
     }>;
-    if (!Array.isArray(data)) return [];
+    if (!Array.isArray(data)) return null;
     return data
       .filter((c) => typeof c.mint === 'string' && c.mint.length >= 32)
       .map((c) => {
@@ -147,7 +159,18 @@ export async function fetchRecentPumpCreates(limit = 50): Promise<PumpRecentCrea
           createdAt,
         };
       });
-  } catch {
-    return [];
+  } catch (err) {
+    const e = err as Error;
+    console.warn('[sync] pump.fun list error:', e.message, e.cause ? String((e.cause as Error).message) : '');
+    return null;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+export async function fetchRecentPumpCreates(limit = 50): Promise<PumpRecentCreate[]> {
+  // Generous timeout — event loop busyness under Geyser load can add ~1-2s of latency
+  // before fetch callbacks run, even though the actual HTTP round-trip is <200ms.
+  const got = await fetchPumpCoinsOnce(limit, 8000);
+  return got ?? [];
 }

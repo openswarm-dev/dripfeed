@@ -14,14 +14,16 @@ export interface PersistedState {
 const DATA_DIR = process.env.RADAR_DATA_DIR?.trim() || path.join(process.cwd(), 'data');
 const STATE_FILE = path.join(DATA_DIR, 'live-state.json');
 
-const DEBOUNCE_MS = 3_000;
-const MAX_WAIT_MS = 15_000;
+const DEBOUNCE_MS = 5_000;
+const MAX_WAIT_MS = 20_000;
 
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let dirtySince = 0;
 let pending: PersistedState | null = null;
 let dbEnabled = false;
 let dbSaving = false;
+/** After postgres timeouts, cool down so create ingest stays hot. */
+let dbCooldownUntil = 0;
 
 export async function initPersist(): Promise<void> {
   dbEnabled = await ensureRadarSchema();
@@ -87,8 +89,16 @@ function saveToFile(payload: PersistedState) {
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     const tmp = `${STATE_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(payload));
-    fs.renameSync(tmp, STATE_FILE);
+    // Cap file snapshot — sync stringify of 5k rows blocked the event loop for seconds.
+    const slim: PersistedState = {
+      ...payload,
+      launches: payload.launches.slice(0, 800),
+      sparks: payload.sparks.slice(0, 100),
+    };
+    void fs.promises
+      .writeFile(tmp, JSON.stringify(slim))
+      .then(() => fs.promises.rename(tmp, STATE_FILE))
+      .catch((err) => console.warn('[persist] file save failed:', (err as Error).message));
   } catch (err) {
     console.warn('[persist] file save failed:', (err as Error).message);
   }
@@ -96,12 +106,13 @@ function saveToFile(payload: PersistedState) {
 
 async function saveToDb(payload: PersistedState) {
   if (!dbEnabled || dbSaving) return;
+  if (Date.now() < dbCooldownUntil) return;
   const pool = getPool();
   if (!pool) return;
   dbSaving = true;
   try {
     // Upsert newest launches only (keep writes light over the public proxy).
-    const launches = payload.launches.slice(0, 800);
+    const launches = payload.launches.slice(0, 400);
     for (let i = 0; i < launches.length; i += 50) {
       const chunk = launches.slice(i, i + 50);
       const values: unknown[] = [];
@@ -153,7 +164,8 @@ async function saveToDb(payload: PersistedState) {
       [JSON.stringify({ liveLaunches: payload.liveLaunches, savedAt: payload.savedAt })],
     );
   } catch (err) {
-    console.warn('[persist] postgres save failed:', (err as Error).message);
+    dbCooldownUntil = Date.now() + 90_000;
+    console.warn('[persist] postgres save failed (cooldown 90s):', (err as Error).message);
   } finally {
     dbSaving = false;
   }

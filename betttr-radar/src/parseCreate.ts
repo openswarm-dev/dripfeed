@@ -1,9 +1,5 @@
-import bs58 from 'bs58';
-import { txEncode } from '@triton-one/yellowstone-grpc';
+﻿import bs58 from 'bs58';
 import { PUMP_PROGRAM } from './config.js';
-
-const TOKEN_PROGRAM_ID = 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA';
-const TOKEN_2022_PROGRAM_ID = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 
 export interface ParsedLaunch {
   signature: string;
@@ -18,415 +14,187 @@ export interface ParsedLaunch {
   image?: string;
 }
 
-function encodeKey(raw: unknown): string | null {
+// Discriminators from pump.fun IDL (confirmed correct)
+const CREATE_V1_DISC = Buffer.from([24, 30, 200, 40, 5, 28, 7, 119]);
+const CREATE_V2_DISC = Buffer.from([214, 144, 76, 236, 95, 139, 49, 180]);
+
+function toBase58(raw: unknown): string | null {
   if (!raw) return null;
   if (typeof raw === 'string') return raw;
-  if (raw instanceof Uint8Array || Array.isArray(raw)) {
-    return bs58.encode(Uint8Array.from(raw as Iterable<number>));
-  }
+  try {
+    if (raw instanceof Uint8Array) return bs58.encode(raw);
+    if (Buffer.isBuffer(raw)) return bs58.encode(new Uint8Array(raw));
+    if (Array.isArray(raw)) return bs58.encode(Uint8Array.from(raw as number[]));
+  } catch { /* ignore */ }
   return null;
+}
+
+function toBuffer(raw: unknown): Buffer | null {
+  if (!raw) return null;
+  if (Buffer.isBuffer(raw)) return raw;
+  if (raw instanceof Uint8Array) return Buffer.from(raw);
+  if (Array.isArray(raw)) return Buffer.from(Uint8Array.from(raw as number[]));
+  return null;
+}
+
+function readString(buf: Buffer, offset: number): { value: string; next: number } | null {
+  if (offset + 4 > buf.length) return null;
+  const len = buf.readUInt32LE(offset);
+  if (len === 0 || len > 512 || offset + 4 + len > buf.length) return null;
+  return { value: buf.toString('utf8', offset + 4, offset + 4 + len).trim(), next: offset + 4 + len };
+}
+
+function decodeCreateArgs(data: Buffer): { name?: string; symbol?: string; metadataUri?: string } {
+  let offset = 8; // skip 8-byte discriminator
+  const name = readString(data, offset);
+  if (!name) return {};
+  offset = name.next;
+  const symbol = readString(data, offset);
+  if (!symbol) return {};
+  offset = symbol.next;
+  const uri = readString(data, offset);
+  return {
+    name: name.value || undefined,
+    symbol: symbol.value || undefined,
+    metadataUri: uri?.value || undefined,
+  };
 }
 
 /**
- * Cheap log prefilter for creates.
- * Do NOT match bare "Instruction: Create" — that also fires for ATA Create on buys
- * and was ingesting nameless fake launches. Do NOT match InitializeMint2 alone.
+ * Parse a Geyser transaction update for a pump.fun create.
+ *
+ * Field names confirmed by live ERPC meta key audit:
+ *   message: { accountKeys, instructions, addressTableLookups, ... }
+ *   meta:    { postTokenBalances, innerInstructions, loadedWritableAddresses,
+ *              loadedReadonlyAddresses, logMessages, ... }
+ *   ix:      { programIdIndex, accounts, data }
+ *
+ * Strategy:
+ *  1. Find the create instruction by discriminator (raw bytes, no JSON encode).
+ *  2. Decode name/symbol/uri from Borsh-serialised instruction data.
+ *  3. Get mint from postTokenBalances[0].mint (Shyft approach, most reliable).
+ *     Fall back to ix.accounts[0] → accountKeys lookup.
+ *  4. Creator = accountKeys[0] (fee payer / wallet).
  */
-function isPumpCreate(logs: string[]): boolean {
-  return logs.some((line) => line.includes('Instruction: CreateV2'));
-}
-
-function isCreateV2(logs: string[]): boolean {
-  return logs.some((line) => line.includes('Instruction: CreateV2'));
-}
-
-/** Prefer *pump vanity mints when present; otherwise first plausible mint key. */
-function extractMint(keys: string[], creator: string): string | null {
-  const pumpMint = keys.find((k) => typeof k === 'string' && k.endsWith('pump') && k !== creator);
-  if (pumpMint) return pumpMint;
-
-  const skip = new Set([
-    creator,
-    PUMP_PROGRAM,
-    '11111111111111111111111111111111',
-    TOKEN_PROGRAM_ID,
-    TOKEN_2022_PROGRAM_ID,
-    'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
-    'SysvarRent111111111111111111111111111111111',
-    'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s',
-    'Ce6TQqeHC9p8KetsN6JsjHK7Uxc7n1kf1cBHZMW4GsLL',
-    '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8',
-    'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rG5H9iBE8tyRWNh',
-    'MAyhSmzXzV1pTf7LsNkrNwkWKTo4ougAJ1PPg47MD4e',
-    'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb',
-  ]);
-
-  for (const key of keys) {
-    if (!skip.has(key) && key.length >= 32) return key;
-  }
-  return null;
-}
-
-function parseEncodedGeyserTx(txInfo: any): {
-  signature: string;
-  keys: string[];
-  logs: string[];
-  creator: string;
-} | null {
-  try {
-    const parsed = txEncode.encode(txInfo, txEncode.encoding.Json, 0, false) as any;
-    const signature = parsed?.transaction?.signatures?.[0];
-    if (!signature) return null;
-
-    const message = parsed.transaction?.message;
-    const keys: string[] = (message?.accountKeys ?? []).map((k: unknown) =>
-      typeof k === 'string' ? k : (k as { pubkey?: string })?.pubkey ?? String(k),
-    );
-
-    const loaded = message?.loadedAddresses;
-    if (loaded) {
-      keys.push(...(loaded.writable ?? []), ...(loaded.readonly ?? []));
-    }
-
-    const logs: string[] = parsed.meta?.logMessages ?? [];
-    return { signature, keys, logs, creator: keys[0] ?? '' };
-  } catch {
-    return null;
-  }
-}
-
-function parseRawGeyserTx(transactionUpdate: any): {
-  signature: string;
-  keys: string[];
-  logs: string[];
-  creator: string;
-} | null {
-  const txInfo = transactionUpdate?.transaction;
-  if (!txInfo) return null;
-
-  const meta = txInfo?.meta ?? txInfo?.transaction?.meta;
-  const logs: string[] = meta?.logMessages ?? meta?.log_messages ?? [];
-
-  const message = txInfo?.transaction?.message ?? txInfo?.message;
-  const keys: string[] = [];
-  const rawKeys = message?.accountKeys ?? message?.staticAccountKeys ?? [];
-  for (const key of rawKeys) {
-    const normalized = normalizeKey(key);
-    if (normalized) keys.push(normalized);
-  }
-
-  const loaded = meta?.loadedAddresses;
-  if (loaded) {
-    for (const key of [...(loaded.writable ?? []), ...(loaded.readonly ?? [])]) {
-      const normalized = normalizeKey(key);
-      if (normalized) keys.push(normalized);
-    }
-  }
-
-  const signature =
-    encodeKey(txInfo?.signature ?? transactionUpdate?.signature) ?? '';
-  if (!signature) return null;
-
-  return { signature, keys, logs, creator: keys[0] ?? '' };
-}
-
-const CREATE_V2_DISC = Buffer.from([0xd6, 0x90, 0x4c, 0xec, 0x5f, 0x8b, 0x31, 0xb4]);
-const CREATE_V1_DISC = Buffer.from([0x18, 0x1e, 0xc8, 0x28, 0x05, 0x1c, 0x07, 0x77]);
-
-function decodeIxData(raw: unknown): Buffer | null {
-  if (!raw) return null;
-  if (typeof raw === 'string') {
-    try {
-      const buf = Buffer.from(bs58.decode(raw));
-      if (buf.length >= 8) return buf;
-    } catch {
-      /* fall through */
-    }
-    try {
-      return Buffer.from(raw, 'base64');
-    } catch {
-      return null;
-    }
-  }
-  if (raw instanceof Uint8Array) {
-    return Buffer.from(raw);
-  }
-  if (Array.isArray(raw)) {
-    return Buffer.from(raw as number[]);
-  }
-  return null;
-}
-
-function readAnchorString(buf: Buffer, offset: number): { value: string; offset: number } | null {
-  if (offset + 4 > buf.length) return null;
-  const len = buf.readUInt32LE(offset);
-  offset += 4;
-  if (len <= 0 || len > 512 || offset + len > buf.length) return null;
-  return { value: buf.toString('utf8', offset, offset + len), offset: offset + len };
-}
-
-function ixAccountIndexes(ix: any): number[] {
-  const raw = ix.accounts ?? ix.accountKeyIndexes ?? ix.accountKeys ?? [];
-  if (!Array.isArray(raw)) return [];
-  return raw.map((a: unknown) => {
-    if (typeof a === 'number') return a;
-    if (typeof a === 'string') return -1;
-    if (a && typeof a === 'object' && 'pubkey' in (a as object)) return -1;
-    return Number(a);
-  }).filter((n) => Number.isFinite(n) && n >= 0);
-}
-
-function ixProgramId(ix: any, accountKeys: string[]): string | null {
-  if (typeof ix.programIdIndex === 'number') return accountKeys[ix.programIdIndex] ?? null;
-  if (typeof ix.programId === 'string') return ix.programId;
-  return null;
-}
-
-type CreateIxInfo = {
-  kind: 'v1' | 'v2';
-  mint?: string;
-  name?: string;
-  symbol?: string;
-  metadataUri?: string;
-};
-
-function parseCreateIx(ix: any, accountKeys: string[]): CreateIxInfo | null {
-  if (ixProgramId(ix, accountKeys) !== PUMP_PROGRAM) return null;
-
-  const data = decodeIxData(ix.data);
-  if (!data || data.length < 12) return null;
-
-  const disc = data.subarray(0, 8);
-  let kind: 'v1' | 'v2' | null = null;
-  if (disc.equals(CREATE_V2_DISC)) kind = 'v2';
-  else if (disc.equals(CREATE_V1_DISC)) kind = 'v1';
-  if (!kind) return null;
-
-  // IDL: create / create_v2 account[0] = mint
-  const idxs = ixAccountIndexes(ix);
-  const mintFromIx =
-    (idxs.length ? accountKeys[idxs[0]!] : undefined)
-    ?? (typeof ix.accounts?.[0] === 'string' ? ix.accounts[0] : undefined);
-
-  let offset = 8;
-  const name = readAnchorString(data, offset);
-  if (!name) return { kind, mint: mintFromIx };
-  offset = name.offset;
-  const symbol = readAnchorString(data, offset);
-  if (!symbol) {
-    return { kind, mint: mintFromIx, name: name.value.trim() || undefined };
-  }
-  offset = symbol.offset;
-  const uri = readAnchorString(data, offset);
-
-  return {
-    kind,
-    mint: mintFromIx,
-    name: name.value.trim() || undefined,
-    symbol: symbol.value.trim() || undefined,
-    metadataUri: uri?.value.trim() || undefined,
-  };
-}
-
-function parseCreateFromMessage(message: any, accountKeys: string[]): CreateIxInfo | null {
-  const instructions: any[] = message?.instructions ?? message?.compiledInstructions ?? [];
-  for (const ix of instructions) {
-    const info = parseCreateIx(ix, accountKeys);
-    if (info) return info;
-  }
-  return null;
-}
-
-function parseCreateFromTx(txInfo: any): CreateIxInfo | null {
-  try {
-    const parsed = txEncode.encode(txInfo, txEncode.encoding.Json, 0, false) as any;
-    const message = parsed?.transaction?.message;
-    if (!message) return null;
-
-    const accountKeys: string[] = (message.accountKeys ?? []).map((k: unknown) =>
-      typeof k === 'string' ? k : (k as { pubkey?: string })?.pubkey ?? String(k),
-    );
-    const loaded = message.loadedAddresses;
-    if (loaded) {
-      accountKeys.push(...(loaded.writable ?? []), ...(loaded.readonly ?? []));
-    }
-
-    const top = parseCreateFromMessage(message, accountKeys);
-    if (top) return top;
-
-    const innerGroups: any[] = parsed.meta?.innerInstructions ?? [];
-    for (const group of innerGroups) {
-      for (const ix of group.instructions ?? []) {
-        const info = parseCreateIx(ix, accountKeys);
-        if (info) return info;
-      }
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-/** @deprecated use parseCreateFromTx — kept for callers expecting meta-only shape */
-function parsePumpMetadataFromTx(txInfo: any): { name?: string; symbol?: string; metadataUri?: string } {
-  const info = parseCreateFromTx(txInfo);
-  if (!info) return {};
-  return { name: info.name, symbol: info.symbol, metadataUri: info.metadataUri };
-}
-
-function findCreateKindFromTx(txInfo: any): 'v1' | 'v2' | null {
-  return parseCreateFromTx(txInfo)?.kind ?? null;
-}
-
-function normalizeKey(key: unknown): string | null {
-  if (typeof key === 'string') return key;
-  if (key && typeof key === 'object' && 'toBase58' in key && typeof (key as any).toBase58 === 'function') {
-    return (key as { toBase58: () => string }).toBase58();
-  }
-  if (key && typeof key === 'object' && 'pubkey' in key) {
-    return String((key as { pubkey: unknown }).pubkey);
-  }
-  return encodeKey(key);
-}
-
-function accountKeysFromTx(tx: any): string[] {
-  const message = tx.transaction?.message;
-  if (!message) return [];
-
-  if (typeof message.getAccountKeys === 'function') {
-    try {
-      const loaded = tx.meta?.loadedAddresses;
-      const keyMeta = loaded
-        ? message.getAccountKeys({
-            accountKeysFromLookups: {
-              writable: (loaded.writable ?? []).map((k: unknown) =>
-                typeof k === 'string' ? k : normalizeKey(k),
-              ).filter(Boolean),
-              readonly: (loaded.readonly ?? []).map((k: unknown) =>
-                typeof k === 'string' ? k : normalizeKey(k),
-              ).filter(Boolean),
-            },
-          })
-        : message.getAccountKeys();
-
-      const segments = keyMeta.keySegments?.() ?? [
-        keyMeta.staticAccountKeys ?? [],
-        ...(keyMeta.accountKeysFromLookups
-          ? [keyMeta.accountKeysFromLookups.writable, keyMeta.accountKeysFromLookups.readonly]
-          : []),
-      ];
-
-      const keys: string[] = [];
-      for (const segment of segments) {
-        for (const key of segment) {
-          const normalized = normalizeKey(key);
-          if (normalized) keys.push(normalized);
-        }
-      }
-      if (keys.length > 0) return keys;
-    } catch {
-      /* fall back to manual parse */
-    }
-  }
-
-  const keys: string[] = [];
-  const raw = message.accountKeys ?? message.staticAccountKeys ?? [];
-  for (const key of raw) {
-    const normalized = normalizeKey(key);
-    if (normalized) keys.push(normalized);
-  }
-
-  const loaded = tx.meta?.loadedAddresses;
-  if (loaded) {
-    for (const key of [...(loaded.writable ?? []), ...(loaded.readonly ?? [])]) {
-      const normalized = normalizeKey(key);
-      if (normalized) keys.push(normalized);
-    }
-  }
-  return keys;
-}
-
-/** Parse a Geyser transaction update for any Pump.fun create. */
-export function parsePumpCreateGeyser(transactionUpdate: any): Omit<ParsedLaunch, 'blockTime'> | null {
+export function parsePumpCreateGeyser(
+  transactionUpdate: any,
+): Omit<ParsedLaunch, 'blockTime'> | null {
   const slot = Number(transactionUpdate?.slot);
   if (!Number.isFinite(slot)) return null;
 
-  const txInfo = transactionUpdate?.transaction;
-  if (!txInfo) return null;
+  const txInfo = transactionUpdate?.transaction;   // SubscribeUpdateTransactionInfo
+  const tx = txInfo?.transaction;                  // Transaction
+  const message = tx?.message;                     // Message
+  const meta = txInfo?.meta;                       // TransactionStatusMeta
 
-  const parsed =
-    parseRawGeyserTx(transactionUpdate) ?? parseEncodedGeyserTx(txInfo);
-  if (!parsed) return null;
+  if (!message) return null;
 
-  // Always try instruction decode first — create+buy bundles often log Buy and
-  // can omit/truncate CreateV2 under load.
-  const create = parseCreateFromTx(txInfo);
-  if (create) {
-    const mint = create.mint || extractMint(parsed.keys, parsed.creator);
-    if (!mint) return null;
+  // Build full account key list (static + ALT-resolved)
+  const rawKeys: unknown[] = message.accountKeys ?? [];
+  const accountKeys: string[] = rawKeys.map((k) => toBase58(k) ?? '').filter(Boolean);
+  const loadedWritable: unknown[] = meta?.loadedWritableAddresses ?? [];
+  const loadedReadonly: unknown[] = meta?.loadedReadonlyAddresses ?? [];
+  for (const k of [...loadedWritable, ...loadedReadonly]) {
+    const s = toBase58(k);
+    if (s) accountKeys.push(s);
+  }
+
+  const creator = accountKeys[0] ?? '';
+
+  const sigRaw = tx?.signatures?.[0];
+  const signature = toBase58(sigRaw) ?? '';
+  if (!signature) return null;
+
+  // All instructions (top-level + inner)
+  const innerGroups: any[] = meta?.innerInstructions ?? [];
+  const allIxs: any[] = [
+    ...(message.instructions ?? []),
+    ...innerGroups.flatMap((g: any) => g.instructions ?? []),
+  ];
+
+  // Find the pump create instruction
+  for (const ix of allIxs) {
+    if (accountKeys[ix.programIdIndex] !== PUMP_PROGRAM) continue;
+
+    const data = toBuffer(ix.data);
+    if (!data || data.length < 8) continue;
+
+    const disc = data.subarray(0, 8);
+    const isV1 = disc.equals(CREATE_V1_DISC);
+    const isV2 = disc.equals(CREATE_V2_DISC);
+    if (!isV1 && !isV2) continue;
+
+    // Decode name/symbol/uri from Borsh data
+    const args = decodeCreateArgs(data);
+
+    // Mint: prefer postTokenBalances[0].mint (most reliable per Shyft docs)
+    const postBals: any[] = meta?.postTokenBalances ?? [];
+    let mint: string | null = null;
+    if (postBals.length > 0) {
+      const m = postBals[0]?.mint;
+      mint = typeof m === 'string' ? m : toBase58(m);
+    }
+    // Fallback: use ix.accounts[0] → accountKeys
+    if (!mint) {
+      const ixAccounts: number[] = Array.isArray(ix.accounts) ? ix.accounts : [];
+      mint = accountKeys[ixAccounts[0]] ?? null;
+    }
+    // Last resort: find first key ending in 'pump'
+    if (!mint) {
+      mint = accountKeys.find((k) => k.endsWith('pump') && k !== creator) ?? null;
+    }
+
+    if (!mint) continue;
+
     return {
-      signature: parsed.signature,
+      signature,
       slot,
       mint,
-      creator: parsed.creator,
-      isCreateV2: create.kind === 'v2',
-      name: create.name,
-      symbol: create.symbol,
-      metadataUri: create.metadataUri,
+      creator,
+      isCreateV2: isV2,
+      name: args.name,
+      symbol: args.symbol,
+      metadataUri: args.metadataUri,
     };
   }
 
-  const logsSayCreateV2 = isPumpCreate(parsed.logs);
-  if (!logsSayCreateV2) return null;
-
-  // Logs said CreateV2 but disc decode failed — last-chance mint extract.
-  const mint = extractMint(parsed.keys, parsed.creator);
-  if (!mint) return null;
-  return {
-    signature: parsed.signature,
-    slot,
-    mint,
-    creator: parsed.creator,
-    isCreateV2: true,
-  };
+  return null;
 }
 
 /** Parse a confirmed RPC transaction response for a Pump.fun create. */
 export function parsePumpCreateTx(tx: any): Omit<ParsedLaunch, 'blockTime'> | null {
   if (!tx?.meta || tx.meta.err) return null;
-
   const logs: string[] = tx.meta.logMessages ?? [];
-  const createV2 = isCreateV2(logs);
-  const maybeV1 = logs.some(
+  const hasCreate = logs.some(
     (l) =>
-      l.includes('Instruction: Create')
-      && !l.includes('CreateV2')
-      && !l.includes('CreateIdempotent')
-      && !l.includes('CreateMetadataAccount'),
+      l.includes('Instruction: Create') ||
+      l.includes('Instruction: CreateV2') ||
+      l.includes('InitializeMint2'),
   );
-  if (!createV2 && !maybeV1) return null;
+  if (!hasCreate) return null;
 
-  const create = parseCreateFromTx(tx);
-  const keys = accountKeysFromTx(tx);
+  const msg = tx.transaction?.message;
+  const keys: string[] = [];
+  for (const k of msg?.accountKeys ?? msg?.staticAccountKeys ?? []) {
+    const s = typeof k === 'string' ? k : toBase58(k);
+    if (s) keys.push(s);
+  }
+  const loaded = tx.meta?.loadedAddresses;
+  if (loaded) {
+    for (const k of [...(loaded.writable ?? []), ...(loaded.readonly ?? [])]) {
+      const s = typeof k === 'string' ? k : toBase58(k);
+      if (s) keys.push(s);
+    }
+  }
+
   const creator = keys[0] ?? '';
-  const mint = create?.mint || extractMint(keys, creator);
+  const mint = keys.find((k) => k.endsWith('pump') && k !== creator) ?? null;
   if (!mint) return null;
 
   const sigRaw = tx.transaction?.signatures?.[0];
-  const signature =
-    typeof sigRaw === 'string' ? sigRaw : encodeKey(sigRaw) ?? '';
+  const signature = typeof sigRaw === 'string' ? sigRaw : (toBase58(sigRaw) ?? '');
   if (!signature) return null;
 
-  const slot = Number(tx.slot ?? 0);
-
-  return {
-    signature,
-    slot,
-    mint,
-    creator,
-    isCreateV2: create?.kind === 'v2' || createV2,
-    name: create?.name,
-    symbol: create?.symbol,
-    metadataUri: create?.metadataUri,
-  };
+  const isCreateV2 = logs.some((l) => l.includes('Instruction: CreateV2'));
+  return { signature, slot: Number(tx.slot ?? 0), mint, creator, isCreateV2 };
 }

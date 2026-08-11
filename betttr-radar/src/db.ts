@@ -27,9 +27,10 @@ export function getPool(): pg.Pool | null {
       ssl: url.includes('localhost') || url.includes('127.0.0.1')
         ? false
         : { rejectUnauthorized: false },
-      max: 2,
-      idleTimeoutMillis: 20_000,
-      connectionTimeoutMillis: 20_000,
+      max: 1,
+      idleTimeoutMillis: 10_000,
+      // Public Railway proxy from Hetzner was hanging 20s and starving create sync.
+      connectionTimeoutMillis: 4_000,
       allowExitOnIdle: true,
     });
     pool.on('error', (err) => {

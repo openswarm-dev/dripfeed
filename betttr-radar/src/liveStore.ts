@@ -1,12 +1,11 @@
-import type { LaunchRecord } from './fetchLaunches.js';
+﻿import type { LaunchRecord } from './fetchLaunches.js';
 import { analyzeMetas, type MetaDashboard } from './metaEngine.js';
 import { loadLatestReport } from './report.js';
 import type { SocialSpark } from './socialSpark.js';
+import { refreshVolumesForMints, fetchVolumeMetrics } from './volume.js';
+import { refreshPumpCoinsForMints, fetchPumpCoin } from './market.js';
 import { hydrateFromDb, initPersist, loadPersistedState, schedulePersist } from './persist.js';
-import { fetchRecentPumpCreates } from './market.js';
-import { classifyNarratives } from './classify.js';
 import { normalizeMediaUrl } from './imageKey.js';
-import { slimLaunchForWire, slimMetasForWire } from './wirePayload.js';
 
 export interface FeedStatus {
   geyser: boolean;
@@ -47,17 +46,6 @@ let geyserStats: GeyserStats = {
   perMinute: 0,
 };
 const recentCreateTimes: number[] = [];
-/** O(1) mint membership — linear scans of 5k launches stall ingest. */
-const knownMints = new Set<string>();
-
-function rebuildMintIndex(launches: LaunchRecord[]) {
-  knownMints.clear();
-  for (const l of launches) knownMints.add(l.mint);
-}
-
-export function hasMint(mint: string): boolean {
-  return knownMints.has(mint);
-}
 
 function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
   const byMint = new Map<string, LaunchRecord>();
@@ -67,40 +55,8 @@ function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): Laun
     byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
   return [...byMint.values()]
-    .sort((a, b) => {
-      const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
-      if (bt !== 0) return bt;
-      return (b.slot ?? 0) - (a.slot ?? 0);
-    })
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
     .slice(0, 5000);
-}
-
-function afterLaunchListChange(launches: LaunchRecord[]) {
-  rebuildMintIndex(launches);
-}
-
-/** Newest create first — blockTime, then slot as tiebreaker. */
-function sortLaunchesByTime(launches: LaunchRecord[]): LaunchRecord[] {
-  return [...launches].sort((a, b) => {
-    const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
-    if (bt !== 0) return bt;
-    return (b.slot ?? 0) - (a.slot ?? 0);
-  });
-}
-
-/** Insert keeping newest-first order before any persist/broadcast. */
-function insertLaunchSorted(launches: LaunchRecord[], launch: LaunchRecord): LaunchRecord[] {
-  const t = launch.blockTime ?? 0;
-  const slot = launch.slot ?? 0;
-  let i = 0;
-  while (i < launches.length) {
-    const cur = launches[i]!;
-    const ct = cur.blockTime ?? 0;
-    if (t > ct) break;
-    if (t === ct && slot > (cur.slot ?? 0)) break;
-    i += 1;
-  }
-  return [...launches.slice(0, i), launch, ...launches.slice(i)].slice(0, 5000);
 }
 
 /** Prefer newer fields, but never let empty/zero polls wipe known-good metrics. */
@@ -111,19 +67,9 @@ function keepMetric(next: number | undefined, prev: number | undefined): number 
 }
 
 function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
-  // Create time: keep the earliest known timestamp (pump list / chain), never
-  // let a late geyser Date.now() jump the token to the top of the feed.
-  let blockTime = prev.blockTime ?? next.blockTime ?? null;
-  if (prev.blockTime != null && next.blockTime != null) {
-    blockTime = Math.min(prev.blockTime, next.blockTime);
-  }
-  const slot = Math.max(prev.slot ?? 0, next.slot ?? 0);
-
   return {
     ...prev,
     ...next,
-    blockTime,
-    slot,
     name: next.name ?? prev.name,
     symbol: next.symbol ?? prev.symbol,
     image: next.image ?? prev.image,
@@ -142,28 +88,7 @@ function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord
 
 function persistCurrent() {
   if (!state) return;
-  // Always persist in canonical time order so DB ORDER BY matches the live feed.
-  schedulePersist(sortLaunchesByTime(state.launches), state.sparks, state.liveLaunches);
-}
-
-function hasLaunchLabel(l: LaunchRecord): boolean {
-  const name = l.name?.trim();
-  const sym = l.symbol?.trim();
-  if (!name && !sym) return false;
-  // mint-prefix placeholders from old false positives
-  if (sym && sym === l.mint.slice(0, 8) && !name) return false;
-  return true;
-}
-
-/** Prefer showing every real create; only hide ancient nameless junk. */
-function isUsableLaunch(l: LaunchRecord): boolean {
-  if (hasLaunchLabel(l) || !!l.metadataUri || !!l.image) return true;
-  const age = l.blockTime ? Math.floor(Date.now() / 1000) - l.blockTime : 0;
-  return age < 180;
-}
-
-function usableLaunches(launches: LaunchRecord[]): LaunchRecord[] {
-  return launches.filter(isUsableLaunch);
+  schedulePersist(state.launches, state.sparks, state.liveLaunches);
 }
 
 function buildState(
@@ -171,9 +96,8 @@ function buildState(
   sparks: SocialSpark[],
   liveLaunchCount = 0,
 ): LiveState {
-  const clean = usableLaunches(launches);
-  const metas = analyzeMetas(clean, 4, sparks, { live: true });
-  const lastLaunch = clean
+  const metas = analyzeMetas(launches, 4, sparks, { live: true });
+  const lastLaunch = launches
     .filter((l) => l.blockTime)
     .sort((a, b) => b.blockTime! - a.blockTime!)[0];
   const lastSpark = sparks[0];
@@ -201,7 +125,7 @@ function buildState(
       ? new Date(lastSpark.receivedAt * 1000).toISOString()
       : null,
     metas,
-    launches: clean,
+    launches,
     sparks: sparks.slice(0, 100),
   };
 }
@@ -209,9 +133,9 @@ function buildState(
 function rebroadcast() {
   if (!state) return;
   broadcast('refresh', {
-    metas: slimMetasForWire(state.metas),
+    metas: state.metas,
     sparks: state.sparks,
-    launches: state.launches.slice(0, 80).map(slimLaunchForWire),
+    launches: state.launches.slice(0, 200),
     geyserStats: state.geyserStats,
     liveLaunches: state.liveLaunches,
   });
@@ -225,7 +149,6 @@ export function initFromReport(): LiveState {
     ? mergeLaunches(persisted.launches, reportLaunches)
     : reportLaunches;
   const sparks = persisted?.sparks ?? [];
-  rebuildMintIndex(launches);
   state = buildState(launches, sparks, persisted?.liveLaunches ?? 0);
   return state;
 }
@@ -249,13 +172,39 @@ export async function initLiveStore(): Promise<LiveState> {
     sparks,
     Math.max(current.liveLaunches, fromDb.liveLaunches),
   );
-  rebuildMintIndex(state.launches);
   return state;
 }
 
-/** Return cached launch only — no pump.fun / DexScreener (keeps create stream healthy). */
+/** On-demand pump.fun + DexScreener refresh for hover panels. */
 export async function forceRefreshLaunch(mint: string): Promise<LaunchRecord | null> {
-  return getState().launches.find((l) => l.mint === mint) ?? null;
+  const current = getState();
+  const existing = current.launches.find((l) => l.mint === mint);
+  if (!existing) return null;
+
+  const [pump, vol] = await Promise.all([
+    fetchPumpCoin(mint),
+    fetchVolumeMetrics(mint),
+  ]);
+
+  const patched: LaunchRecord = mergeLaunchRecord(existing, {
+    ...existing,
+    name: pump?.name,
+    symbol: pump?.symbol,
+    description: pump?.description,
+    image: normalizeMediaUrl(pump?.image) ?? existing.image,
+    marketCapUsd: pump?.marketCapUsd,
+    bonded: pump?.bonded,
+    holderCount: pump?.holderCount,
+    bondingProgressPct: pump?.bondingProgressPct,
+    marketUpdatedAt: pump?.updatedAt,
+    volumeUsd24h: vol?.volumeUsd24h,
+    volumeUsd1h: vol?.volumeUsd1h,
+    txns24h: vol?.txns24h,
+    volumeUpdatedAt: vol?.volumeUpdatedAt,
+  });
+
+  updateLaunch(patched);
+  return getState().launches.find((l) => l.mint === mint) ?? patched;
 }
 
 export function getState(): LiveState {
@@ -302,42 +251,10 @@ export function recordCreateStored() {
 
 export function addLaunch(launch: LaunchRecord) {
   const current = getState();
-  if (knownMints.has(launch.mint)) return;
+  if (current.launches.some((l) => l.mint === launch.mint)) return;
 
   recordCreateStored();
-  knownMints.add(launch.mint);
-  const launches = insertLaunchSorted(current.launches, launch);
-  // Keep index in sync when oldest rows are dropped by the 5k cap.
-  if (launches.length < current.launches.length + 1) {
-    rebuildMintIndex(launches);
-  }
-
-  // Soft path: push to UI immediately — never run analyzeMetas on the hot create path.
-  if (state) {
-    state = {
-      ...state,
-      launches,
-      liveLaunches: current.liveLaunches + 1,
-      lastLaunchAt: launch.blockTime
-        ? new Date(launch.blockTime * 1000).toISOString()
-        : state.lastLaunchAt,
-      feeds: {
-        geyser: geyserConnected,
-        tweetstream: tweetstreamConnected,
-        tweetstreamAccounts: state.feeds.tweetstreamAccounts,
-      },
-      geyserStats: { ...geyserStats, perMinute: recentCreateTimes.length },
-    };
-    broadcast('launch', {
-      launch,
-      geyserStats: state.geyserStats,
-      liveLaunches: state.liveLaunches,
-    });
-    persistCurrent();
-    scheduleMetaRecalc();
-    return;
-  }
-
+  const launches = [launch, ...current.launches].slice(0, 5000);
   state = buildState(launches, current.sparks, current.liveLaunches + 1);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
@@ -352,39 +269,13 @@ export function addLaunch(launch: LaunchRecord) {
   persistCurrent();
 }
 
-let metaRecalcTimer: ReturnType<typeof setTimeout> | null = null;
-let metasDirty = false;
-
-/** Mark metas dirty; flushed on a short interval so Building/Hot keep moving. */
-function scheduleMetaRecalc() {
-  metasDirty = true;
-  if (metaRecalcTimer) return;
-  metaRecalcTimer = setTimeout(() => {
-    metaRecalcTimer = null;
-    if (!metasDirty) return;
-    metasDirty = false;
-    recalcMetas();
-  }, 120);
-}
-
 export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
   const current = getState();
   const idx = current.launches.findIndex((l) => l.mint === launch.mint);
   if (idx < 0) return;
 
-  const merged = mergeLaunchRecord(current.launches[idx]!, launch);
-  const timeChanged =
-    merged.blockTime !== current.launches[idx]!.blockTime
-    || merged.slot !== current.launches[idx]!.slot;
-
-  let launches: LaunchRecord[];
-  if (timeChanged) {
-    const without = current.launches.filter((l) => l.mint !== launch.mint);
-    launches = insertLaunchSorted(without, merged);
-  } else {
-    launches = [...current.launches];
-    launches[idx] = merged;
-  }
+  const launches = [...current.launches];
+  launches[idx] = mergeLaunchRecord(launches[idx]!, launch);
 
   // Soft path: patch launch + light broadcast without full meta recompute.
   // Used for progressive enrich so geyser isn't starved at 100% CPU.
@@ -398,13 +289,12 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
         tweetstreamAccounts: state.feeds.tweetstreamAccounts,
       },
     };
-    // Only send the patched launch — never re-serialize the whole feed on every enrich tick.
     broadcast('launch', {
-      launch: merged,
+      launch: launches[idx],
+      launches: state.launches.slice(0, 200),
       geyserStats: { ...geyserStats },
       liveLaunches: state.liveLaunches,
     });
-    scheduleMetaRecalc();
     return;
   }
 
@@ -427,7 +317,7 @@ export function addSpark(spark: SocialSpark) {
   persistCurrent();
 }
 
-/** Merge scan file into live buffer — never wipe live captures. */
+/** Merge scan file into live buffer ÔÇö never wipe live captures. */
 export function refreshFromReport() {
   const report = loadLatestReport();
   if (!report) return;
@@ -446,93 +336,98 @@ export function recalcMetas() {
   state = buildState(current.launches, current.sparks, current.liveLaunches);
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
-  // Always push metas so Building / Hot / opportunity clusters move in the UI.
-  broadcast('refresh', {
-    metas: slimMetasForWire(state.metas),
-    geyserStats: state.geyserStats,
-    liveLaunches: state.liveLaunches,
-  });
+  rebroadcast();
 }
 
-/** Metrics polling disabled — pump.fun/DexScreener starved ERPC create handling. */
+let volumeRefreshRunning = false;
+let volumePollOffset = 0;
+const METRICS_BATCH = 36;
+const NEWEST_PRIORITY = 18;
+
+function needsMetrics(l: LaunchRecord): boolean {
+  return (
+    l.marketCapUsd == null
+    || l.holderCount == null
+    || l.volumeUsd1h == null
+    || l.txns24h == null
+    || l.bondingProgressPct == null
+  );
+}
+
+/** Poll DexScreener + pump.fun for recent launches (newest always first, then rotate). */
 export async function refreshLaunchVolumes() {
-  return;
-}
-
-/**
- * Gap-fill newest pump.fun creates via one list API call (identity only).
- * This is the safety net that keeps us aligned with pump.fun / Axiom when
- * Geyser misses create+buy bundles — must never stay locked.
- */
-let createSyncRunning = false;
-let createSyncStartedAt = 0;
-
-async function syncRecentPumpCreatesInner() {
-  const recent = await fetchRecentPumpCreates(60);
-  if (!recent.length) {
-    console.log('[sync] pump list empty/unreachable');
-    return;
-  }
-
-  const fresh = recent
-    .filter((coin) => !knownMints.has(coin.mint))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-    .slice(0, 25);
-
-  let added = 0;
-  for (const coin of fresh) {
-    if (knownMints.has(coin.mint)) continue;
-
-    const cls = classifyNarratives({
-      name: coin.name,
-      symbol: coin.symbol,
-      mint: coin.mint,
-    });
-
-    addLaunch({
-      signature: `pump-sync:${coin.mint}`,
-      slot: 0,
-      blockTime: coin.createdAt || Math.floor(Date.now() / 1000),
-      mint: coin.mint,
-      creator: coin.creator ?? '',
-      isCreateV2: true,
-      name: coin.name,
-      symbol: coin.symbol,
-      image: normalizeMediaUrl(coin.image),
-      metadataUri: coin.metadataUri,
-      narratives: cls.narratives,
-      primaryNarrative: cls.primaryNarrative,
-      narrativeScore: cls.narrativeScore,
-    });
-    added += 1;
-  }
-
-  if (added) {
-    console.log(`[sync] gap-filled ${added} creates from pump.fun list`);
-  }
-}
-
-export async function syncRecentPumpCreates() {
-  if (!state) return;
-  if (createSyncRunning) {
-    if (Date.now() - createSyncStartedAt < 15_000) return;
-    console.warn('[sync] clearing stuck lock (>15s)');
-    createSyncRunning = false;
-  }
-
-  createSyncRunning = true;
-  createSyncStartedAt = Date.now();
+  if (volumeRefreshRunning || !state) return;
+  volumeRefreshRunning = true;
   try {
-    await Promise.race([
-      syncRecentPumpCreatesInner(),
-      new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error('sync timeout 12s')), 12_000);
-      }),
+    const current = getState();
+    const now = Math.floor(Date.now() / 1000);
+    const recentSorted = current.launches
+      .filter((l) => l.blockTime && now - l.blockTime <= 7200)
+      .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0));
+    const missingMetrics = recentSorted.filter(needsMetrics).slice(0, NEWEST_PRIORITY).map((l) => l.mint);
+    const newest = [
+      ...missingMetrics,
+      ...recentSorted.slice(0, NEWEST_PRIORITY).map((l) => l.mint),
+    ].filter((m, i, arr) => arr.indexOf(m) === i).slice(0, NEWEST_PRIORITY);
+    const recent = recentSorted.map((l) => l.mint);
+    const metaMints = [
+      ...current.metas.active,
+      ...current.metas.forming,
+      ...(current.metas.emerging ?? []),
+    ].flatMap((m) => m.tokens.map((t) => t.mint));
+    const rotatePool = [...new Set([...recent, ...metaMints])].filter((m) => !newest.includes(m));
+    if (!newest.length && !rotatePool.length) return;
+
+    volumePollOffset = rotatePool.length ? volumePollOffset % rotatePool.length : 0;
+    const rotated: string[] = [];
+    const rotateCount = Math.max(0, METRICS_BATCH - newest.length);
+    for (let i = 0; i < rotateCount && rotatePool.length; i++) {
+      rotated.push(rotatePool[(volumePollOffset + i) % rotatePool.length]!);
+    }
+    if (rotatePool.length) {
+      volumePollOffset = (volumePollOffset + rotateCount) % rotatePool.length;
+    }
+
+    const mints = [...new Set([...newest, ...rotated])];
+
+    const [volumes, markets] = await Promise.all([
+      refreshVolumesForMints(mints, 10),
+      refreshPumpCoinsForMints(mints, 10),
     ]);
-  } catch (err) {
-    console.warn('[sync] failed:', (err as Error).message);
+    if (!volumes.size && !markets.size) return;
+
+    let changed = false;
+    const launches = current.launches.map((l) => {
+      const vol = volumes.get(l.mint);
+      const mkt = markets.get(l.mint);
+      if (!vol && !mkt) return l;
+      changed = true;
+      return mergeLaunchRecord(l, {
+        ...l,
+        name: mkt?.name,
+        symbol: mkt?.symbol,
+        image: mkt?.image,
+        volumeUsd24h: vol?.volumeUsd24h,
+        volumeUsd1h: vol?.volumeUsd1h,
+        txns24h: vol?.txns24h,
+        volumeUpdatedAt: vol?.volumeUpdatedAt,
+        marketCapUsd: mkt?.marketCapUsd,
+        bonded: mkt?.bonded,
+        holderCount: mkt?.holderCount,
+        bondingProgressPct: mkt?.bondingProgressPct,
+        marketUpdatedAt: mkt?.updatedAt,
+      });
+    });
+
+    if (changed) {
+      state = buildState(launches, current.sparks, current.liveLaunches);
+      state.feeds.geyser = geyserConnected;
+      state.feeds.tweetstream = tweetstreamConnected;
+      rebroadcast();
+      persistCurrent();
+    }
   } finally {
-    createSyncRunning = false;
+    volumeRefreshRunning = false;
   }
 }
 
