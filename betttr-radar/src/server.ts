@@ -26,12 +26,12 @@ const PUBLIC = path.join(__dirname, '..', 'public');
 const HOST = process.env.HOST || '0.0.0.0';
 
 async function logOutboundIp() {
-  if (!process.env.RAILWAY_ENVIRONMENT) return;
+  if (!process.env.RAILWAY_ENVIRONMENT && !process.env.RENDER) return;
   try {
     const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
     const data = await res.json() as { ip?: string };
     if (data.ip) {
-      console.log(`  Railway egress IP: ${data.ip}`);
+      console.log(`  Outbound egress IP: ${data.ip}`);
     }
   } catch {
     /* non-fatal */
@@ -58,6 +58,7 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {
     || origin.includes('127.0.0.1')
     || origin.endsWith('.railway.app')
     || origin.endsWith('.up.railway.app')
+    || origin.endsWith('.onrender.com')
     || ALLOWED_ORIGINS.includes(origin);
   if (ok) {
     res.setHeader('Access-Control-Allow-Origin', origin);

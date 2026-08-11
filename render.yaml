@@ -1,8 +1,59 @@
 services:
-  # ── drip-server ────────────────────────────────────────────────────────────
+  # ── betttr-radar (meta radar engine — needs Geyser egress IP whitelisted in ERPC) ──
+  - type: web
+    name: betttr-radar
+    runtime: node
+    region: frankfurt
+    rootDir: betttr-radar
+    buildCommand: npm install --include=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BETTTR_GEYSER
+        value: "true"
+      - key: NARRA_GEYSER
+        value: "true"
+      - key: GEYSER_RPC_POLL
+        value: "false"
+      - key: SOLANA_RPC_URL
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: GEYSER_ENDPOINT
+        value: http://grpc-fra1-burst.erpc.global
+      - key: TWEETSTREAM_API_KEY
+        sync: false
+      - key: TWEETSTREAM_WS_URL
+        value: wss://ws-global.tweetstream.io/ws
+      - key: TWEETSTREAM_ACCOUNTS
+        value: elonmusk;AutismCapital;realDonaldTrump;tier10k;lookonchain
+
+  # ── drip-frontend (Next.js UI — proxies to betttr-radar over private network) ──
+  - type: web
+    name: drip-frontend
+    runtime: node
+    region: frankfurt
+    rootDir: drip-frontend
+    buildCommand: npm install --include=dev && npm run build
+    startCommand: npm run start:next
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RADAR_API_URL
+        fromService:
+          type: web
+          name: betttr-radar
+          property: hostport
+      - key: NEXT_PUBLIC_API_URL
+        sync: false
+
+  # ── drip-server (campaign backend — optional) ────────────────────────────────
   - type: web
     name: drip-server
     runtime: node
+    region: frankfurt
     rootDir: drip-server
     buildCommand: npm install --include=dev && npm run build
     startCommand: node dist/index.js
@@ -13,71 +64,14 @@ services:
       - key: PORT
         value: 4000
       - key: FRONTEND_URL
-        sync: false          # set in Render dashboard → paste your frontend URL
+        sync: false
       - key: TWITTER_API_KEY
-        sync: false          # get from twitterapi.io/dashboard
+        sync: false
       - key: SOLANA_RPC_URL
-        sync: false          # https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+        sync: false
       - key: TREASURY_PRIVATE_KEY
-        sync: false          # base58 private key of treasury wallet
+        sync: false
       - key: DRIP_MINT_ADDRESS
-        sync: false          # SPL token mint (set when you launch the token)
+        sync: false
       - key: REWARD_POLL_INTERVAL_MS
-        value: 300000        # 5 minutes
-
-  # ── drip-frontend ──────────────────────────────────────────────────────────
-  - type: web
-    name: drip-frontend
-    runtime: node
-    rootDir: drip-frontend
-    buildCommand: cd ../betttr-radar && npm install --include=dev && cd ../drip-frontend && npm install --include=dev && npm run build
-    startCommand: npm run start
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: NEXT_PUBLIC_API_URL
-        sync: false
-      - key: RADAR_API_URL
-        sync: false          # optional external radar; leave unset to bundle betttr-radar in frontend
-      - key: BETTTR_GEYSER
-        value: "true"
-      - key: SOLANA_RPC_URL
-        sync: false
-      - key: HELIUS_API_KEY
-        sync: false
-      - key: GEYSER_ENDPOINT
-        value: http://grpc-fra1-burst.erpc.global
-      - key: TWEETSTREAM_API_KEY
-        sync: false
-      - key: TWEETSTREAM_WS_URL
-        value: wss://ws-global.tweetstream.io/ws
-      - key: TWEETSTREAM_ACCOUNTS
-        value: elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain
-
-  # ── betttr-radar (meta radar engine) ─────────────────────────────────────
-  - type: web
-    name: betttr-radar
-    runtime: node
-    rootDir: betttr-radar
-    buildCommand: npm install --include=dev
-    startCommand: npm start
-    healthCheckPath: /health
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: BETTTR_GEYSER
-        value: "true"
-      - key: SOLANA_RPC_URL
-        sync: false
-      - key: HELIUS_API_KEY
-        sync: false
-      - key: GEYSER_ENDPOINT
-        value: http://grpc-fra1-burst.erpc.global
-      - key: TWEETSTREAM_API_KEY
-        sync: false
-      - key: TWEETSTREAM_WS_URL
-        value: wss://ws-global.tweetstream.io/ws
-      - key: TWEETSTREAM_ACCOUNTS
-        value: elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain
-      - key: ALLOWED_ORIGINS
-        sync: false
+        value: 300000
