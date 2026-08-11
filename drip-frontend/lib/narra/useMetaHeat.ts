@@ -115,13 +115,17 @@ export function useMetaHeat(metas: MetaTrack[] | undefined) {
 
 export function sortMetasByHeat(
   metas: MetaTrack[],
-  levels: Map<string, number>,
+  _levels?: Map<string, number>,
 ): MetaTrack[] {
+  // Stable ranking — do NOT use smooth heat levels (they tick ~80ms and cause feed churn).
   return [...metas].sort((a, b) => {
-    const ha = levels.get(a.id) ?? 0;
-    const hb = levels.get(b.id) ?? 0;
-    if (hb !== ha) return hb - ha;
     if (b.launchCount !== a.launchCount) return b.launchCount - a.launchCount;
-    return (b.totalVolumeUsd1h ?? 0) - (a.totalVolumeUsd1h ?? 0);
+    const va = a.totalVolumeUsd1h ?? 0;
+    const vb = b.totalVolumeUsd1h ?? 0;
+    if (vb !== va) return vb - va;
+    const ta = a.totalTxns24h ?? 0;
+    const tb = b.totalTxns24h ?? 0;
+    if (tb !== ta) return tb - ta;
+    return (b.lastSeen ?? 0) - (a.lastSeen ?? 0);
   });
 }
