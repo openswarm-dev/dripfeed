@@ -1,23 +1,27 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import "./narra.css";
 import { WalletProvider } from "@/providers/WalletProvider";
 
 const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "DRIP — Web3 Creator Rewards",
-  description: "Earn $DRIP tokens for the attention you generate on X. Watch your vault drip in real time.",
+  title: "Betttr.xyz — Meta Radar",
+  description: "Real-time pump.fun meta radar. Track narrative formation, social sparks, and trader psychology.",
   icons: {
-    icon: "/favicon.png",
-    apple: "/favicon.png",
+    icon: "/logos/Betttr.png",
+    apple: "/logos/Betttr.png",
   },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <head>
+        <link rel="preload" href="/logos/Betttr.png" as="image" type="image/png" />
+      </head>
       <body>
         <WalletProvider>
           {children}

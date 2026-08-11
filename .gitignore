@@ -14,6 +14,10 @@ drip-server/dist/
 # Environment secrets — NEVER commit these
 drip-frontend/.env.local
 drip-server/.env
+betttr-radar/.env
+
+# Radar runtime data (generated locally)
+betttr-radar/data/
 
 # OS
 .DS_Store

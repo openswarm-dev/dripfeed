@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NARRA — Meta Radar · betttr</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css?v=8" />
+</head>
+<body>
+  <!-- Loading screen (template Landing) -->
+  <div id="loader" class="loader">
+    <div class="loader-orb loader-orb-a animate-drift"></div>
+    <div class="loader-orb loader-orb-b animate-drift-delay"></div>
+    <div class="loader-orb loader-orb-c animate-drift-slow"></div>
+    <div class="grid-dots-dark loader-grid"></div>
+
+    <div class="loader-inner">
+      <div class="loader-brand">
+        <p class="holo-text loader-title">NARRA</p>
+        <p class="loader-sub">Real-time meta radar · trader psychology · pump.fun creates</p>
+      </div>
+
+      <div class="loader-card">
+        <div class="holo-edge loader-stripe"></div>
+        <div class="loader-steps">
+          <div class="loader-step" id="loader-geyser">
+            <div class="loader-step-left">
+              <span class="loader-dot"></span>
+              <span class="loader-step-label">Geyser live stream</span>
+            </div>
+            <div class="loader-action"><span class="loader-wait">Waiting…</span></div>
+          </div>
+          <div class="loader-step" id="loader-x">
+            <div class="loader-step-left">
+              <span class="loader-dot"></span>
+              <span class="loader-step-label">X social sparks</span>
+            </div>
+            <div class="loader-action"><span class="loader-wait">Waiting…</span></div>
+          </div>
+          <div class="loader-step" id="loader-meta">
+            <div class="loader-step-left">
+              <span class="loader-dot"></span>
+              <span class="loader-step-label">Meta psychology engine</span>
+            </div>
+            <div class="loader-action"><span class="loader-wait">Waiting…</span></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="loader-foot">Slate matte · glass radar · non-custodial reads only</p>
+    </div>
+  </div>
+
+  <div class="progress-rail"><div class="holo-fill progress-fill" id="progressFill"></div></div>
+
+  <div class="ambient" aria-hidden="true">
+    <div class="ambient-orb orb-a animate-drift"></div>
+    <div class="ambient-orb orb-b animate-drift-delay"></div>
+    <div class="ambient-orb orb-c animate-drift-slow"></div>
+    <div class="grid-dots-dark ambient-grid"></div>
+    <div class="noise-overlay-dark ambient-noise"></div>
+  </div>
+
+  <div class="app" id="appRoot">
+    <header class="header glass-header">
+      <div class="brand">
+        <span class="holo-text brand-logo">NARRA</span>
+        <span class="brand-tag">betttr</span>
+      </div>
+      <div class="header-status">
+        <div class="status-pill glass-pill" id="geyserStatus">
+          <span class="dot"></span>
+          <span class="label">Geyser…</span>
+        </div>
+        <div class="status-pill glass-pill" id="xStatus">
+          <span class="dot"></span>
+          <span class="label">X…</span>
+        </div>
+        <div class="meta-pill glass-pill" id="metaStats">—</div>
+      </div>
+    </header>
+
+    <div class="context-bar">
+      <section class="card glass-card hero" id="heroMeta">
+        <div class="hero-loading">Loading…</div>
+      </section>
+      <section class="card glass-card stage-rail" id="stageRail"></section>
+    </div>
+
+    <main class="dashboard">
+      <div class="row-top">
+        <section class="card glass-card spark-card">
+          <div class="card-header">
+            <h2>Social sparks</h2>
+            <span class="badge accent" id="sparkCount">0</span>
+          </div>
+          <div class="card-scroll" id="sparkList"></div>
+        </section>
+
+        <section class="card glass-card alert-card">
+          <div class="card-header">
+            <h2>Forming</h2>
+            <span class="badge warn" id="formingCount">0</span>
+          </div>
+          <div class="card-scroll" id="formingList"></div>
+        </section>
+
+        <section class="card glass-card active-card">
+          <div class="card-header">
+            <h2>Active</h2>
+            <span class="badge accent" id="activeCount">0</span>
+          </div>
+          <div class="card-scroll" id="activeList"></div>
+        </section>
+
+        <section class="card glass-card launches-card">
+          <div class="card-header">
+            <h2>Live creates</h2>
+            <span class="badge accent" id="launchCount">0</span>
+          </div>
+          <p class="rate-line" id="launchRate">—</p>
+          <div class="card-scroll launch-feed" id="launchFeed"></div>
+        </section>
+      </div>
+
+      <div class="row-bottom">
+        <section class="card glass-card detail-card">
+          <div class="card-header">
+            <h2>Meta detail</h2>
+          </div>
+          <div class="card-scroll" id="metaDetail">
+            <p class="empty">Select a meta</p>
+          </div>
+        </section>
+
+        <section class="card glass-card timeline-card">
+          <div class="card-header">
+            <h2>Timeline</h2>
+          </div>
+          <div class="card-scroll timeline-feed" id="timelineFeed"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="/app.js?v=12"></script>
+</body>
+</html>

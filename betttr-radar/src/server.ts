@@ -1,0 +1,158 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { config, validateConfig } from './config.js';
+import {
+  getState,
+  initFromReport,
+  subscribe,
+  heartbeat,
+  refreshFromReport,
+  setTweetStreamAccounts,
+  recalcMetas,
+  refreshLaunchVolumes,
+} from './liveStore.js';
+import { startGeyserFeed } from './geyserFeed.js';
+import {
+  startTweetStreamFeed,
+  setupTweetStreamAccounts,
+  fetchTweetStreamMe,
+} from './tweetStreamFeed.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PUBLIC = path.join(__dirname, '..', 'public');
+
+const MIME: Record<string, string> = {
+  '.html': 'text/html',
+  '.css': 'text/css',
+  '.js': 'application/javascript',
+  '.svg': 'image/svg+xml',
+};
+
+validateConfig();
+initFromReport();
+setTweetStreamAccounts(config.tweetstreamAccounts);
+
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {
+  const origin = req.headers.origin;
+  if (!origin) return;
+  const ok =
+    origin.includes('localhost')
+    || origin.includes('127.0.0.1')
+    || origin.endsWith('.railway.app')
+    || origin.endsWith('.up.railway.app')
+    || ALLOWED_ORIGINS.includes(origin);
+  if (ok) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  }
+}
+
+const server = http.createServer((req, res) => {
+  const url = req.url?.split('?')[0] ?? '/';
+
+  applyCors(req, res);
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    res.end();
+    return;
+  }
+
+  if (url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: true, service: 'betttr-radar' }));
+    return;
+  }
+
+  if (url === '/api/state') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(getState()));
+    return;
+  }
+
+  if (url === '/api/report') {
+    const state = getState();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      generatedAt: state.metas.generatedAt,
+      days: state.metas.lookbackDays,
+      totalLaunches: state.metas.totalLaunches,
+      metas: state.metas,
+      launches: state.launches.slice(0, 500),
+      sparks: state.sparks,
+      geyserStats: state.geyserStats,
+      geyserEnabled: config.geyserEnabled,
+      live: {
+        connected: state.connected,
+        feeds: state.feeds,
+        liveLaunches: state.liveLaunches,
+        liveSparks: state.liveSparks,
+        lastLaunchAt: state.lastLaunchAt,
+        lastSparkAt: state.lastSparkAt,
+      },
+    }));
+    return;
+  }
+
+  if (url === '/api/stream') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write(`event: init\ndata: ${JSON.stringify(getState())}\n\n`);
+
+    const send = (data: string) => res.write(data);
+    const unsub = subscribe(send);
+
+    req.on('close', () => {
+      unsub();
+    });
+    return;
+  }
+
+  const file = url === '/' ? '/index.html' : url;
+  const filePath = path.join(PUBLIC, file);
+  if (!filePath.startsWith(PUBLIC) || !fs.existsSync(filePath)) {
+    res.writeHead(404);
+    res.end('Not found');
+    return;
+  }
+
+  const ext = path.extname(filePath);
+  res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+  fs.createReadStream(filePath).pipe(res);
+});
+
+server.listen(config.port, async () => {
+  console.log(`\n  Betttr.xyz Meta Radar (live)`);
+  console.log(`  http://localhost:${config.port}\n`);
+
+  setInterval(heartbeat, 25_000);
+  setInterval(recalcMetas, 10_000);
+  setInterval(() => void refreshLaunchVolumes(), 30_000);
+  setInterval(refreshFromReport, 60_000);
+
+  if (config.tweetstreamApiKey) {
+    await fetchTweetStreamMe();
+    await setupTweetStreamAccounts();
+    startTweetStreamFeed();
+  } else {
+    console.log('  TweetStream off — set TWEETSTREAM_API_KEY in narra/.env\n');
+  }
+
+  if (config.geyserEnabled) {
+    startGeyserFeed().catch((err) => {
+      console.error('Geyser feed failed:', err?.message ?? err);
+    });
+  } else {
+    console.log('  Geyser off — set NARRA_GEYSER=true for live pump creates\n');
+  }
+});

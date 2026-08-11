@@ -36,6 +36,36 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        sync: false          # set to your drip-server Render URL e.g. https://drip-server.onrender.com
+        sync: false
+      - key: RADAR_API_URL
+        sync: false          # betttr-radar service URL
       - key: NEXT_PUBLIC_SOLANA_RPC
-        sync: false          # https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+        sync: false
+
+  # ── betttr-radar (meta radar engine) ─────────────────────────────────────
+  - type: web
+    name: betttr-radar
+    runtime: node
+    rootDir: betttr-radar
+    buildCommand: npm install --include=dev
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: BETTTR_GEYSER
+        value: "true"
+      - key: SOLANA_RPC_URL
+        sync: false
+      - key: HELIUS_API_KEY
+        sync: false
+      - key: GEYSER_ENDPOINT
+        value: http://grpc-fra1-burst.erpc.global
+      - key: TWEETSTREAM_API_KEY
+        sync: false
+      - key: TWEETSTREAM_WS_URL
+        value: wss://ws-global.tweetstream.io/ws
+      - key: TWEETSTREAM_ACCOUNTS
+        value: elonmusk,AutismCapital,realDonaldTrump,tier10k,lookonchain
+      - key: ALLOWED_ORIGINS
+        sync: false

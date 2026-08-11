@@ -58,10 +58,14 @@ export function startRewardEngine(): void {
   const interval = Number(process.env.REWARD_POLL_INTERVAL_MS) || 5 * 60_000;
 
   async function tick() {
-    const posts = await prisma.post.findMany({ where: { verified: true } });
-    if (posts.length === 0) return;
-    console.log(`[RewardEngine] Refreshing ${posts.length} post(s)…`);
-    await Promise.allSettled(posts.map(p => refreshPostMetrics(p.id)));
+    try {
+      const posts = await prisma.post.findMany({ where: { verified: true } });
+      if (posts.length === 0) return;
+      console.log(`[RewardEngine] Refreshing ${posts.length} post(s)…`);
+      await Promise.allSettled(posts.map(p => refreshPostMetrics(p.id)));
+    } catch (err) {
+      console.error('[RewardEngine] Tick failed:', err);
+    }
   }
 
   setTimeout(tick, 30_000);

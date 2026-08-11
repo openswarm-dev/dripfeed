@@ -7,11 +7,16 @@ export const campaignsRouter = Router();
 
 /** GET /api/campaigns — list all active campaigns */
 campaignsRouter.get('/', async (_req: Request, res: Response) => {
-  const campaigns = await prisma.campaign.findMany({
-    where: { active: true },
-    orderBy: { createdAt: 'desc' },
-  });
-  res.json({ campaigns });
+  try {
+    const campaigns = await prisma.campaign.findMany({
+      where: { active: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ campaigns });
+  } catch (err) {
+    console.error('[Campaigns] Error:', err);
+    res.status(503).json({ error: 'Database unavailable' });
+  }
 });
 
 /** GET /api/campaigns/:id — single campaign */

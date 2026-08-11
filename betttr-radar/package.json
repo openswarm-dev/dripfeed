@@ -1,0 +1,30 @@
+{
+  "name": "betttr-radar",
+  "version": "0.1.0",
+  "description": "Betttr.xyz pump.fun meta radar (Geyser + TweetStream)",
+  "type": "module",
+  "scripts": {
+    "scan": "tsx src/index.ts scan",
+    "live": "tsx src/index.ts live",
+    "pulse": "tsx src/index.ts pulse",
+    "report": "tsx src/index.ts report",
+    "dev": "tsx src/server.ts",
+    "start": "tsx src/server.ts"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.4",
+    "@triton-one/yellowstone-grpc": "^4.0.2",
+    "bs58": "^6.0.0",
+    "dotenv": "^17.2.1",
+    "ws": "^8.18.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
