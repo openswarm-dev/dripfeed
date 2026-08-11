@@ -1,21 +1,30 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MetaStage, MetaTrack, LaunchRecord } from "@/lib/narra/types";
-import { fmtAge, fmtTime, formatCompact, capitalize, findMeta } from "@/lib/narra/format";
+import { fmtAge, formatCompact, capitalize } from "@/lib/narra/format";
 import { getLaunchDisplay, shouldShowLaunch } from "@/lib/narra/launchDisplay";
 import { BetttrCard, PanelTitle } from "@/components/ui/BetttrCard";
 import { TokenImage } from "@/components/ui/TokenImage";
+import { LiveAge } from "@/components/narra/LiveAge";
+import { HoverOverlay } from "@/components/narra/HoverOverlay";
+import { useMetaHeat, sortMetasByHeat } from "@/lib/narra/useMetaHeat";
+import { metricDir, metaSnapshot, computeOpportunityScore, opportunityTier, type TimelineEvent } from "@/lib/narra/heat";
+import { displayTheme } from "@/lib/narra/displayTheme";
+import { AnimatedFeed } from "@/components/narra/AnimatedFeed";
+import { OpportunityFeedCard } from "@/components/narra/OpportunityFeedCard";
+import { PumpFunButton } from "@/components/ui/PumpFunButton";
 
 const LOGO_SRC = "/logos/Betttr.png";
-const STAGE_CLASS: Record<string, string> = {
-  spark: "spark",
-  naming: "spark",
-  recognition: "",
-  copycat: "copycat",
-  momentum: "momentum",
-  peak: "momentum",
-  fade: "fade",
+const STAGE_LABELS: Record<string, string> = {
+  spark: "Spark",
+  naming: "Naming",
+  recognition: "Recognition",
+  copycat: "Copycat wave",
+  momentum: "Money follows",
+  peak: "Peak",
+  fade: "Fade",
+  launch: "Launch",
 };
 
 function DecayMeter({ m, compact }: { m: MetaTrack; compact?: boolean }) {
@@ -72,61 +81,63 @@ function sortMetasByStage(metas: MetaTrack[], stageFilter: MetaStage | null, spa
   });
 }
 
-function displayTheme(theme: string): string {
-  return theme.replace(/ — \d+ tokens sharing the same image$/, "").replace(/ · image copycats$/, "");
-}
-
-function ImageStrip({ images, max = 4 }: { images?: string[]; max?: number }) {
-  if (!images?.length) return null;
-  return (
-    <div className="meta-images meta-images--compact">
-      {images.slice(0, max).map((url) => (
-        <TokenImage key={url} src={url} size={20} />
-      ))}
-      {images.length > max && <span className="meta-more">+{images.length - max}</span>}
-    </div>
-  );
-}
-
 function MetaCard({
   m,
-  selected,
   extraClass,
   stageFilter,
   sparks,
-  onSelect,
+  heatIntensity = 0,
+  surging = false,
+  prevSnapshot,
+  onHover,
+  onHoverEnd,
 }: {
   m: MetaTrack;
-  selected: boolean;
   extraClass?: string;
   stageFilter?: MetaStage | null;
   sparks?: { text: string; terms?: string[] }[];
-  onSelect: (id: string) => void;
+  heatIntensity?: number;
+  surging?: boolean;
+  prevSnapshot?: ReturnType<typeof metaSnapshot>;
+  onHover: (m: MetaTrack, el: HTMLElement) => void;
+  onHoverEnd: () => void;
 }) {
   const stageHit = stageFilter
     ? metaMatchesStage(m, stageFilter, sparks ?? [])
     : false;
   const stageDimmed = !!stageFilter && !stageHit;
+  const prev = prevSnapshot ?? metaSnapshot(m);
+  const countDir = metricDir(m.launchCount, prev.launchCount);
+  const volDir = metricDir(m.totalVolumeUsd1h, prev.totalVolumeUsd1h);
+  const txDir = metricDir(m.totalTxns24h, prev.totalTxns24h);
+  const glow = 0.08 + heatIntensity * 0.28;
 
   return (
     <button
       type="button"
-      className={`meta-item meta-item--compact ${extraClass ?? ""} ${selected ? "selected" : ""} ${stageHit ? "stage-hit" : ""} ${stageDimmed ? "stage-dimmed" : ""}`}
-      onClick={() => onSelect(m.id)}
+      className={`meta-item meta-item--compact ${extraClass ?? ""} ${stageHit ? "stage-hit" : ""} ${stageDimmed ? "stage-dimmed" : ""} ${surging ? "meta-item--surging" : ""}`}
+      style={{ boxShadow: `0 0 0 1px rgba(200, 240, 255, ${glow})` }}
+      onMouseEnter={(e) => onHover(m, e.currentTarget)}
+      onMouseLeave={onHoverEnd}
     >
       <div className="meta-row-top">
-        <TokenImage src={m.sampleImages[0]} size={28} />
+        <TokenImage src={m.sampleImages[0]} size={28} priority />
         <div className="meta-row-main">
           <span className="theme">{displayTheme(m.theme)}</span>
           <span className="meta-key-stat">
-            <strong>{m.launchCount}</strong> coins · <strong>{m.velocityPerHour}/hr</strong>
-            {m.totalVolumeUsd24h > 0 ? <> · <strong>${formatCompact(m.totalVolumeUsd24h)}</strong> vol</> : null}
+            <strong className={countDir === "up" ? "metric-up" : ""}>{m.launchCount}</strong> coins
+            {m.totalVolumeUsd1h > 0 ? (
+              <> · <strong className={`metric-vol ${volDir === "up" ? "metric-up" : ""}`}>${formatCompact(m.totalVolumeUsd1h)}</strong>/1h vol</>
+            ) : m.totalVolumeUsd24h > 0 ? (
+              <> · <strong className="metric-vol">${formatCompact(m.totalVolumeUsd24h)}</strong>/24h vol</>
+            ) : null}
+            {m.totalTxns24h > 0 ? <> · <strong className={txDir === "up" ? "metric-up" : ""}>{m.totalTxns24h}</strong> tx</> : null}
           </span>
         </div>
-        <span className={`stage-pill ${STAGE_CLASS[m.stage] ?? ""}`}>{m.stageLabel}</span>
+        <span className="opp-badge stage-pill">{m.stageLabel}</span>
       </div>
       <div className="meta-row-sub">
-        <span>Last coin <strong data-ts={m.lastSeen}>{fmtAge(m.lastSeenAgoSec)}</strong> ago</span>
+        <span>Newest add <strong><LiveAge ts={m.lastSeen} /></strong> ago</span>
         {m.uniqueCreators > 1 && <span>{m.uniqueCreators} deployers</span>}
       </div>
     </button>
@@ -230,9 +241,32 @@ export default function NarraDashboard({
   onLoaderDone: () => void;
 }) {
   const [showLoader, setShowLoader] = useState(true);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
   const [appVisible, setAppVisible] = useState(false);
+  const [hoverTarget, setHoverTarget] = useState<
+    | { kind: "meta"; id: string; rect: DOMRect }
+    | { kind: "launch"; mint: string; rect: DOMRect }
+    | null
+  >(null);
+  const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showMetaHover = (m: MetaTrack, el: HTMLElement) => {
+    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
+    setHoverTarget({ kind: "meta", id: m.id, rect: el.getBoundingClientRect() });
+  };
+
+  const showLaunchHover = (l: LaunchRecord, el: HTMLElement) => {
+    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
+    setHoverTarget({ kind: "launch", mint: l.mint, rect: el.getBoundingClientRect() });
+  };
+
+  const hideHover = () => {
+    hoverHideRef.current = setTimeout(() => setHoverTarget(null), 150);
+  };
+
+  const cancelHideHover = () => {
+    if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
+  };
 
   const metas = state?.metas ?? null;
   const launches = state?.launches ?? [];
@@ -240,6 +274,29 @@ export default function NarraDashboard({
   const geyserStats = state?.geyserStats;
   const live = state?.live;
   const feeds = live?.feeds;
+
+  const resolvedHover = useMemo(() => {
+    if (!hoverTarget) return null;
+    if (hoverTarget.kind === "launch") {
+      const l = launches.find((x) => x.mint === hoverTarget.mint);
+      if (!l) return null;
+      return { kind: "launch" as const, l, rect: hoverTarget.rect };
+    }
+    const pool = metas
+      ? [...(metas.emerging ?? []), ...metas.forming, ...metas.active]
+      : [];
+    const m = pool.find((x) => x.id === hoverTarget.id);
+    if (!m) return null;
+    return { kind: "meta" as const, m, rect: hoverTarget.rect };
+  }, [hoverTarget, launches, metas]);
+
+  const allMetasForHeat = useMemo(
+    () => metas ? [...(metas.emerging ?? []), ...metas.forming, ...metas.active] : [],
+    [metas],
+  );
+  const { levels: heatLevels, intensities: heatIntensities, surging, prevSnapshots } = useMetaHeat(allMetasForHeat);
+  const seenEventsRef = useRef<Set<string>>(new Set());
+  const [flashKeys, setFlashKeys] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (loading) return;
@@ -255,34 +312,23 @@ export default function NarraDashboard({
     }
   }, [loaderDone, loading, error, onLoaderDone]);
 
-  useEffect(() => {
-    const tick = setInterval(() => {
-      const now = Math.floor(Date.now() / 1000);
-      document.querySelectorAll<HTMLElement>("[data-ts]").forEach((el) => {
-        const ts = Number(el.dataset.ts);
-        if (!ts) return;
-        el.textContent = fmtAge(now - ts);
-      });
-    }, 1000);
-    return () => clearInterval(tick);
-  }, []);
+  const formingClusters = useMemo(() => {
+    if (!metas) return [];
+    const staged = sortMetasByStage([...(metas.emerging ?? []), ...metas.forming], stageFilter, sparks);
+    return sortMetasByHeat(staged, heatLevels);
+  }, [metas, stageFilter, sparks, heatLevels]);
 
-  useEffect(() => {
-    if (!metas || selectedId) return;
-    const first = metas.active[0] ?? metas.forming[0] ?? metas.emerging?.[0] ?? metas.all[0];
-    if (first) setSelectedId(first.id);
-  }, [metas, selectedId]);
+  const activeMetas = useMemo(() => {
+    if (!metas) return [];
+    const staged = sortMetasByStage(metas.active, stageFilter, sparks);
+    return sortMetasByHeat(staged, heatLevels);
+  }, [metas, stageFilter, sparks, heatLevels]);
 
-  const selected = metas && selectedId ? findMeta(metas, selectedId) : null;
-  const hero = selected
-    ?? metas?.active[0]
-    ?? metas?.forming[0]
+  const hero = activeMetas[0]
+    ?? formingClusters[0]
     ?? metas?.emerging?.[0]
     ?? metas?.all[0]
     ?? null;
-
-  const formingClusters = metas ? sortMetasByStage([...(metas.emerging ?? []), ...metas.forming], stageFilter, sparks) : [];
-  const activeMetas = metas ? sortMetasByStage(metas.active, stageFilter, sparks) : [];
 
   const stageFilterCount = useMemo(() => {
     if (!stageFilter || !metas) return 0;
@@ -290,38 +336,134 @@ export default function NarraDashboard({
     return all.filter((m) => metaMatchesStage(m, stageFilter, sparks)).length;
   }, [stageFilter, metas, sparks]);
 
-  const timelineEvents: Array<{
-    at: number;
-    stage: string;
-    theme: string;
-    label: string;
-    metaId: string | null;
-    isSocial?: boolean;
-  }> = [];
+  const timelineEvents = useMemo(() => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const events: TimelineEvent[] = [];
+    const seenMints = new Set<string>();
+    const seenMetas = new Set<string>();
 
-  for (const s of sparks) {
-    timelineEvents.push({
-      at: s.receivedAt,
-      stage: "spark",
-      theme: s.handle,
-      label: s.text.slice(0, 100),
-      metaId: null,
-      isSocial: true,
-    });
-  }
-  if (metas) {
-    for (const m of [...(metas.emerging ?? []), ...metas.forming, ...metas.active]) {
-      for (const ev of m.timeline) {
-        timelineEvents.push({ ...ev, theme: m.theme, metaId: m.id });
+    for (const l of launches) {
+      if (!l.blockTime || seenMints.has(l.mint)) continue;
+      seenMints.add(l.mint);
+      const parts = [
+        l.primaryNarrative && l.primaryNarrative !== "unknown" ? l.primaryNarrative : null,
+        l.marketCapUsd ? `$${formatCompact(l.marketCapUsd)} mcap` : null,
+        l.volumeUsd1h ? `$${formatCompact(l.volumeUsd1h)}/1h vol` : null,
+        l.txns24h ? `${l.txns24h} tx` : null,
+        l.bonded ? "graduated" : null,
+      ].filter(Boolean);
+      const label = parts.length ? parts.join(" · ") : "New pump.fun create";
+      const score = computeOpportunityScore({
+        at: l.blockTime,
+        stage: "launch",
+        isLaunch: true,
+        label,
+      }, null, nowSec) + ((l.volumeUsd1h ?? 0) > 50 || (l.txns24h ?? 0) > 5 ? 2 : 0);
+      events.push({
+        feedId: `launch:${l.mint}`,
+        at: l.blockTime,
+        stage: "launch",
+        theme: l.symbol ?? l.name ?? "New token",
+        label,
+        metaId: null,
+        image: l.image,
+        isLaunch: true,
+        opportunityScore: score,
+        tier: opportunityTier(score),
+      });
+      if (events.length >= 40) break;
+    }
+
+    if (metas) {
+      for (const m of [...(metas.emerging ?? []), ...metas.forming, ...metas.active]) {
+        if (seenMetas.has(m.id)) continue;
+        seenMetas.add(m.id);
+        const stats = [
+          `${m.launchCount} coins`,
+          m.totalVolumeUsd1h > 0 ? `$${formatCompact(m.totalVolumeUsd1h)}/1h vol` : null,
+          m.totalTxns24h > 0 ? `${m.totalTxns24h} tx` : null,
+        ].filter(Boolean).join(" · ");
+        const label = m.psychologyLabel || stats;
+        const score = computeOpportunityScore({
+          at: m.lastSeen,
+          stage: m.stage,
+          label,
+          stats,
+        }, m, nowSec);
+        events.push({
+          feedId: `meta:${m.id}`,
+          at: m.lastSeen,
+          stage: m.stage,
+          theme: m.theme,
+          label,
+          metaId: m.id,
+          image: m.sampleImages[0],
+          stats,
+          opportunityScore: score,
+          tier: opportunityTier(score),
+        });
       }
     }
-  }
-  timelineEvents.sort((a, b) => b.at - a.at);
+
+    events.sort((a, b) => {
+      if (b.opportunityScore !== a.opportunityScore) return b.opportunityScore - a.opportunityScore;
+      return b.at - a.at;
+    });
+    return events;
+  }, [launches, metas]);
+
+  const opportunityFeed = useMemo(() => timelineEvents.slice(0, 80), [timelineEvents]);
+
+  const opportunityFeedItems = useMemo(
+    () => opportunityFeed.map((ev) => ({
+      ...ev,
+      id: ev.feedId,
+      isNew: flashKeys.has(ev.feedId),
+    })),
+    [opportunityFeed, flashKeys],
+  );
+
+  const formingFeedItems = useMemo(
+    () => formingClusters.map((m) => ({ ...m, id: m.id })),
+    [formingClusters],
+  );
+
+  const activeFeedItems = useMemo(
+    () => activeMetas.map((m) => ({ ...m, id: m.id })),
+    [activeMetas],
+  );
 
   const visibleLaunches = useMemo(
     () => launches.filter((l) => shouldShowLaunch(l)),
     [launches],
   );
+
+  const launchFeedItems = useMemo(
+    () => visibleLaunches.slice(0, 80).map((l) => ({ ...l, id: l.mint })),
+    [visibleLaunches],
+  );
+
+  useEffect(() => {
+    const next = new Set<string>();
+    const fresh = new Set<string>();
+    for (const ev of timelineEvents.slice(0, 24)) {
+      const key = ev.feedId;
+      next.add(key);
+      if (!seenEventsRef.current.has(key)) fresh.add(key);
+    }
+    seenEventsRef.current = next;
+    if (fresh.size) {
+      setFlashKeys((prev) => new Set([...prev, ...fresh]));
+      const t = setTimeout(() => {
+        setFlashKeys((prev) => {
+          const n = new Set(prev);
+          for (const k of fresh) n.delete(k);
+          return n;
+        });
+      }, 4000);
+      return () => clearTimeout(t);
+    }
+  }, [timelineEvents]);
 
   const progressPct = useMemo(() => {
     if (!metas) return 8;
@@ -363,10 +505,6 @@ export default function NarraDashboard({
                       ? "Geyser disabled"
                       : "Geyser connecting…"}
               </span>
-            </div>
-            <div className={`radar-pill ${feeds?.tweetstream ? "radar-pill--live" : ""}`}>
-              <span className="radar-pill__dot" />
-              <span>{feeds?.tweetstream ? `X · ${sparks.length} sparks` : "X connecting…"}</span>
             </div>
             <div className="radar-pill radar-pill--stats">
               {metas
@@ -416,8 +554,8 @@ export default function NarraDashboard({
                       <span className="lbl">rate</span>
                     </div>
                     <div className="hero-stat">
-                      <span className="val">{sparks.length}</span>
-                      <span className="lbl">sparks</span>
+                      <span className="val">{metas?.activeMetaCount ?? 0}</span>
+                      <span className="lbl">active</span>
                     </div>
                   </div>
                 )}
@@ -431,16 +569,16 @@ export default function NarraDashboard({
                     <span className="lbl">tokens</span>
                   </div>
                   <div className="hero-stat">
-                    <span className="val t-metric">{hero.velocityPerHour}/h</span>
-                    <span className="lbl">velocity</span>
+                    <span className="val t-metric">${formatCompact(hero.totalVolumeUsd1h || hero.totalVolumeUsd24h)}</span>
+                    <span className="lbl">cluster vol</span>
                   </div>
                   <div className="hero-stat">
-                    <span className="val" data-ts={hero.firstSeen}>{fmtAge(hero.firstSeenAgoSec)}</span>
+                    <span className="val"><LiveAge ts={hero.firstSeen} /></span>
                     <span className="lbl">since 1st</span>
                   </div>
                   <div className="hero-stat">
-                    <span className="val" data-ts={hero.lastSeen}>{fmtAge(hero.lastSeenAgoSec)}</span>
-                    <span className="lbl">last seen</span>
+                    <span className="val"><LiveAge ts={hero.lastSeen} /></span>
+                    <span className="lbl">newest add</span>
                   </div>
                 </div>
                 <div className="stage-badge">
@@ -486,193 +624,173 @@ export default function NarraDashboard({
           </BetttrCard>
         </div>
 
+        <HoverOverlay target={resolvedHover} onMouseEnter={cancelHideHover} onMouseLeave={hideHover}>
         <main className="dashboard">
-          <div className="row-top">
-            <BetttrCard accent="spark">
-              <PanelTitle count={sparks.length} variant="live">Social sparks</PanelTitle>
-              <div className="card-scroll">
-                {!sparks.length ? (
-                  <p className="empty">Waiting for posts from watched X accounts…</p>
-                ) : sparks.slice(0, 20).map((s) => (
-                  <div key={s.id} className="spark-item">
-                    <div className="handle">@{s.handle} · {s.kind}</div>
-                    <div className="text">{s.text.slice(0, 140)}{s.text.length > 140 ? "…" : ""}</div>
-                    <div className="time">
-                      {fmtTime(s.receivedAt)}
-                      {s.link && (
-                        <> · <a href={s.link} target="_blank" rel="noopener noreferrer" data-cursor-hover>view</a></>
-                      )}
-                    </div>
-                  </div>
-                ))}
+          <div className="row-main">
+            <BetttrCard accent="timeline">
+              <PanelTitle count={opportunityFeed.filter((e) => e.tier >= 2).length} variant="live">Opportunity feed</PanelTitle>
+              <p className="panel-hint">Best setups first — ranked by activity &amp; stage</p>
+              <div className="card-scroll" id="timelineFeed">
+                {!opportunityFeed.length ? (
+                  <p className="empty">Watching for momentum…</p>
+                ) : (
+                  <AnimatedFeed
+                    className="animated-feed"
+                    items={opportunityFeedItems}
+                    renderItem={(ev) => (
+                      <OpportunityFeedCard
+                        ev={ev}
+                        flash={flashKeys.has(ev.feedId)}
+                      />
+                    )}
+                  />
+                )}
               </div>
             </BetttrCard>
 
             <BetttrCard accent="forming">
               <PanelTitle count={metas?.formingCount ?? 0} variant="warn">Building</PanelTitle>
-              <p className="panel-hint">Same idea, multiple coins launching — watch these grow</p>
+              <p className="panel-hint">Clusters forming — hottest rise to the top</p>
               <div className="card-scroll">
                 {!formingClusters.length ? (
                   <p className="empty">Watching for 2+ token clusters…</p>
-                ) : formingClusters.map((m) => (
-                  <MetaCard
-                    key={m.id}
-                    m={m}
-                    selected={selectedId === m.id}
-                    extraClass={m.isEmerging ? "emerging" : "new-forming"}
-                    stageFilter={stageFilter}
-                    sparks={sparks}
-                    onSelect={setSelectedId}
+                ) : (
+                  <AnimatedFeed
+                    className="animated-feed"
+                    items={formingFeedItems}
+                    renderItem={(m) => (
+                      <MetaCard
+                        m={m}
+                        extraClass={m.isEmerging ? "emerging" : "new-forming"}
+                        stageFilter={stageFilter}
+                        sparks={sparks}
+                        heatIntensity={heatIntensities.get(m.id) ?? 0}
+                        surging={surging.has(m.id)}
+                        prevSnapshot={prevSnapshots.get(m.id)}
+                        onHover={showMetaHover}
+                        onHoverEnd={hideHover}
+                      />
+                    )}
                   />
-                ))}
+                )}
               </div>
             </BetttrCard>
 
             <BetttrCard accent="active">
               <PanelTitle count={metas?.activeMetaCount ?? 0} variant="live">Hot right now</PanelTitle>
-              <p className="panel-hint">Confirmed metas with real volume and deployer activity</p>
+              <p className="panel-hint">Confirmed metas — hover for detail</p>
               <div className="card-scroll">
-                {!metas?.active.length ? (
+                {!activeMetas.length ? (
                   <p className="empty">No active metas in the last 6 hours</p>
-                ) : activeMetas.map((m) => (
-                  <MetaCard
-                    key={m.id}
-                    m={m}
-                    selected={selectedId === m.id}
-                    stageFilter={stageFilter}
-                    sparks={sparks}
-                    onSelect={setSelectedId}
+                ) : (
+                  <AnimatedFeed
+                    className="animated-feed"
+                    items={activeFeedItems}
+                    renderItem={(m) => (
+                      <MetaCard
+                        m={m}
+                        stageFilter={stageFilter}
+                        sparks={sparks}
+                        heatIntensity={heatIntensities.get(m.id) ?? 0}
+                        surging={surging.has(m.id)}
+                        prevSnapshot={prevSnapshots.get(m.id)}
+                        onHover={showMetaHover}
+                        onHoverEnd={hideHover}
+                      />
+                    )}
                   />
-                ))}
+                )}
               </div>
             </BetttrCard>
 
             <BetttrCard accent="launch">
               <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
-              <p className="panel-hint">Every pump.fun create as it happens — click ↗ to open</p>
+              <p className="panel-hint">Live creates — hover for stats</p>
               <div className="card-scroll">
                 {!visibleLaunches.length ? (
                   <p className="empty">Waiting for CreateV2 stream…</p>
-                ) : visibleLaunches.slice(0, 60).map((l) => (
-                  <LaunchRow key={l.mint + l.signature} l={l} />
-                ))}
-              </div>
-            </BetttrCard>
-          </div>
-
-          <div className="row-bottom">
-            <BetttrCard accent="detail">
-              <PanelTitle>Meta detail</PanelTitle>
-              <div className="card-scroll">
-                {!selected ? (
-                  <p className="empty">Select a meta from Forming or Active</p>
                 ) : (
-                  <MetaDetail m={selected} />
+                  <AnimatedFeed
+                    className="animated-feed"
+                    items={launchFeedItems}
+                    renderItem={(l) => (
+                      <LaunchRow
+                        l={l}
+                        onHover={showLaunchHover}
+                        onHoverEnd={hideHover}
+                      />
+                    )}
+                  />
                 )}
-              </div>
-            </BetttrCard>
-
-            <BetttrCard accent="timeline">
-              <PanelTitle>Timeline</PanelTitle>
-              <div className="card-scroll" id="timelineFeed">
-                {!timelineEvents.length ? (
-                  <p className="empty">No timeline events yet</p>
-                ) : timelineEvents.slice(0, 50).map((ev, i) => (
-                  <button
-                    key={`${ev.at}-${i}`}
-                    type="button"
-                    className="timeline-event"
-                    data-cursor-hover={ev.metaId ? true : undefined}
-                    onClick={() => ev.metaId && setSelectedId(ev.metaId)}
-                  >
-                    <span className="time">{fmtTime(ev.at)}</span>
-                    <span className="label">
-                      <span className="stage-tag">{ev.stage}</span>
-                      {ev.isSocial ? (
-                        <strong>@{ev.theme}</strong>
-                      ) : (
-                        <strong>&quot;{ev.theme}&quot;</strong>
-                      )}{" "}
-                      — {ev.label}
-                    </span>
-                  </button>
-                ))}
               </div>
             </BetttrCard>
           </div>
         </main>
+        </HoverOverlay>
       </div>
     </div>
   );
 }
 
-function LaunchRow({ l }: { l: LaunchRecord }) {
+function LaunchRow({
+  l,
+  onHover,
+  onHoverEnd,
+}: {
+  l: LaunchRecord;
+  onHover: (l: LaunchRecord, el: HTMLElement) => void;
+  onHoverEnd: () => void;
+}) {
   const { label, sub, pending } = getLaunchDisplay(l);
-  const ageSec = l.blockTime ? Math.floor(Date.now() / 1000) - l.blockTime : null;
+  const prevRef = useRef<Partial<LaunchRecord>>({});
+  const prev = prevRef.current;
+  const mcapDir = metricDir(l.marketCapUsd, prev.marketCapUsd);
+  const volDir = metricDir(l.volumeUsd1h, prev.volumeUsd1h);
+  const txDir = metricDir(l.txns24h, prev.txns24h);
+  const holderDir = metricDir(l.holderCount, prev.holderCount);
+  prevRef.current = {
+    marketCapUsd: l.marketCapUsd,
+    volumeUsd1h: l.volumeUsd1h,
+    txns24h: l.txns24h,
+    holderCount: l.holderCount,
+  };
 
   return (
-    <div className={`launch-row ${pending ? "launch-row--pending" : ""}`}>
-      <TokenImage src={l.image} size={30} />
+    <div
+      className={`launch-row ${pending ? "launch-row--pending" : ""}`}
+      onMouseEnter={(e) => onHover(l, e.currentTarget)}
+      onMouseLeave={onHoverEnd}
+    >
+      <TokenImage src={l.image} size={30} priority />
       <div className="launch-meta">
         <div className={`sym ${pending ? "sym--pending" : ""}`}>
           {label}
           {l.isCreateV2 && !pending && <span className="v2-tag">V2</span>}
+          {l.bonded && <span className="bond-tag bonded">Graduated</span>}
+          {!l.bonded && l.bondingProgressPct != null && l.bondingProgressPct > 0 && (
+            <span className="bond-tag">{l.bondingProgressPct}%</span>
+          )}
         </div>
         {sub && <div className={`name-line ${pending ? "name-line--pending" : ""}`}>{sub}</div>}
       </div>
       <div className="launch-side">
         {l.blockTime && (
-          <span className="age-tag launch-age" data-ts={l.blockTime}>{fmtAge(ageSec)}</span>
+          <span className="age-tag launch-age"><LiveAge ts={l.blockTime} /></span>
         )}
-        {!pending && l.volumeUsd1h ? <span className="vol-tag">${formatCompact(l.volumeUsd1h)}</span> : null}
-        <a href={`https://pump.fun/coin/${l.mint}`} target="_blank" rel="noopener noreferrer" title="Open on pump.fun">↗</a>
+        {!pending && l.marketCapUsd ? (
+          <span className={`mcap-tag ${mcapDir === "up" ? "metric-up" : ""}`}>${formatCompact(l.marketCapUsd)}</span>
+        ) : null}
+        {!pending && l.txns24h ? (
+          <span className={`tx-tag ${txDir === "up" ? "metric-up" : ""}`}>{l.txns24h} tx</span>
+        ) : null}
+        {!pending && l.holderCount ? (
+          <span className={`holder-tag ${holderDir === "up" ? "metric-up" : ""}`}>{l.holderCount} holders</span>
+        ) : null}
+        {!pending && l.volumeUsd1h ? (
+          <span className={`vol-tag ${volDir === "up" ? "metric-up" : ""}`}>${formatCompact(l.volumeUsd1h)}/1h</span>
+        ) : null}
+        <PumpFunButton mint={l.mint} />
       </div>
     </div>
-  );
-}
-
-function MetaDetail({ m }: { m: MetaTrack }) {
-  return (
-    <>
-      <div className="detail-section">
-        <div className="detail-theme rainbow-text">&quot;{m.theme}&quot;</div>
-        <div className="detail-timers">
-          <span className="age-tag">Narrative first seen <strong data-ts={m.firstSeen}>{fmtAge(m.firstSeenAgoSec)}</strong> ago</span>
-          <span className="age-tag">Last token <strong data-ts={m.lastSeen}>{fmtAge(m.lastSeenAgoSec)}</strong> ago</span>
-          <span className="age-tag">Span {m.spanHours}h</span>
-        </div>
-        <DecayMeter m={m} />
-        <div className="detail-grid">
-          <div className="detail-stat"><div className="val">{m.stageLabel}</div><div className="lbl">Stage</div></div>
-          <div className="detail-stat"><div className="val">{m.launchCount}</div><div className="lbl">Coins</div></div>
-          <div className="detail-stat"><div className="val">{m.launchRateNow}/h</div><div className="lbl">Launch rate</div></div>
-          <div className="detail-stat"><div className="val">${formatCompact(m.totalVolumeUsd1h)}</div><div className="lbl">Vol 1h</div></div>
-        </div>
-      </div>
-
-      <div className="detail-section">
-        <h3>Psychology</h3>
-        <p className="t-body" style={{ color: "var(--radar-cyan)" }}>{m.psychologyLabel}</p>
-        <p className="t-mono" style={{ color: "var(--radar-subtle)", marginTop: 8 }}>{m.traderMindset}</p>
-      </div>
-
-      <div className="detail-section">
-        <h3>Deploying</h3>
-        <div className="deploy-grid">
-          {m.tokens.slice(0, 10).map((t) => (
-            <a key={t.mint} className="deploy-card" href={`https://pump.fun/coin/${t.mint}`} target="_blank" rel="noopener noreferrer">
-              <TokenImage src={t.image} size={48} className="deploy-img-wrap" />
-              <div className="deploy-label">{t.symbol ?? t.name ?? t.mint.slice(0, 6)}</div>
-              {t.blockTime && (
-                <div className="deploy-age" data-ts={t.blockTime}>{fmtAge(t.ageSec)}</div>
-              )}
-              {t.volumeUsd24h ? (
-                <div className="deploy-mcap">${formatCompact(t.volumeUsd24h)}</div>
-              ) : null}
-            </a>
-          ))}
-        </div>
-      </div>
-    </>
   );
 }

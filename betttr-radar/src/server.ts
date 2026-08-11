@@ -12,6 +12,7 @@ import {
   setTweetStreamAccounts,
   recalcMetas,
   refreshLaunchVolumes,
+  updateLaunch,
 } from './liveStore.js';
 import { startGeyserFeed } from './geyserFeed.js';
 import { startRpcPollFeed } from './rpcPollFeed.js';
@@ -21,7 +22,6 @@ import {
   fetchTweetStreamMe,
 } from './tweetStreamFeed.js';
 import { enrichLaunchLive } from './enrich.js';
-import { getState, updateLaunch } from './liveStore.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
@@ -163,21 +163,26 @@ const server = http.createServer((req, res) => {
 });
 
 async function enrichStaleLaunches() {
+  const now = Math.floor(Date.now() / 1000);
   const pending = getState().launches
     .filter((l) => {
       const hasLabel = (l.symbol?.trim() || l.name?.trim()) && l.symbol !== l.mint.slice(0, 8);
       return !hasLabel || !l.image;
     })
-    .slice(0, 12);
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
+    .filter((l) => !l.blockTime || now - l.blockTime <= 3600)
+    .slice(0, 20);
 
-  for (const l of pending) {
-    try {
-      const enriched = await enrichLaunchLive(l);
-      updateLaunch(enriched);
-    } catch {
-      /* retry next interval */
-    }
-  }
+  await Promise.all(
+    pending.map(async (l) => {
+      try {
+        const enriched = await enrichLaunchLive(l, (partial) => updateLaunch(partial));
+        updateLaunch(enriched);
+      } catch {
+        /* retry next interval */
+      }
+    }),
+  );
 }
 
 server.listen(config.port, HOST, async () => {
@@ -186,9 +191,9 @@ server.listen(config.port, HOST, async () => {
 
   setInterval(heartbeat, 25_000);
   setInterval(recalcMetas, 10_000);
-  setInterval(() => void refreshLaunchVolumes(), 30_000);
+  setInterval(() => void refreshLaunchVolumes(), 5_000);
   setInterval(refreshFromReport, 60_000);
-  setInterval(() => void enrichStaleLaunches(), 12_000);
+  setInterval(() => void enrichStaleLaunches(), 4_000);
 
   if (config.tweetstreamApiKey) {
     await fetchTweetStreamMe();

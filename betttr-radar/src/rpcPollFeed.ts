@@ -94,7 +94,9 @@ export async function startRpcPollFeed() {
             `[poll] ${launch.isCreateV2 ? 'V2' : 'V1'} ${launch.symbol ?? launch.name ?? launch.mint.slice(0, 8)}…`,
           );
 
-          void enrichLaunchLive({ ...parsed, blockTime }).then((enriched) => {
+          void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
+            updateLaunch(partial);
+          }).then((enriched) => {
             updateLaunch(enriched);
           }).catch(() => {});
         }

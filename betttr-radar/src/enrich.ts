@@ -3,9 +3,12 @@ import { classifyNarratives } from './classify.js';
 import type { LaunchRecord } from './fetchLaunches.js';
 import { fetchVolumeMetrics } from './volume.js';
 import { normalizeMediaUrl } from './imageKey.js';
+import { fetchPumpCoin } from './market.js';
 
 const cache = new Map<string, Partial<LaunchRecord>>();
-const RETRY_MS = [300, 600, 1200, 2000, 3500];
+const RETRY_MS = [200, 450, 900, 1600, 2800];
+
+export type EnrichProgress = (partial: LaunchRecord) => void;
 
 async function fetchJsonMetadata(uri?: string): Promise<Partial<LaunchRecord>> {
   const url = normalizeMediaUrl(uri);
@@ -13,7 +16,7 @@ async function fetchJsonMetadata(uri?: string): Promise<Partial<LaunchRecord>> {
   try {
     const res = await fetch(url, {
       headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000),
+      signal: AbortSignal.timeout(3500),
     });
     if (!res.ok) return {};
     const data = (await res.json()) as { name?: string; symbol?: string; image?: string };
@@ -28,29 +31,19 @@ async function fetchJsonMetadata(uri?: string): Promise<Partial<LaunchRecord>> {
 }
 
 async function fetchPumpFun(mint: string): Promise<Partial<LaunchRecord>> {
-  try {
-    const res = await fetch(`https://frontend-api.pump.fun/coins/${mint}`, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(4000),
-    });
-    if (!res.ok) return {};
-    const data = (await res.json()) as {
-      name?: string;
-      symbol?: string;
-      description?: string;
-      image_uri?: string;
-      usd_market_cap?: number;
-    };
-    return {
-      name: data.name,
-      symbol: data.symbol,
-      description: data.description,
-      image: normalizeMediaUrl(data.image_uri),
-      marketCapUsd: data.usd_market_cap,
-    };
-  } catch {
-    return {};
-  }
+  const data = await fetchPumpCoin(mint);
+  if (!data) return {};
+  return {
+    name: data.name,
+    symbol: data.symbol,
+    description: data.description,
+    image: normalizeMediaUrl(data.image),
+    marketCapUsd: data.marketCapUsd,
+    bonded: data.bonded,
+    holderCount: data.holderCount,
+    bondingProgressPct: data.bondingProgressPct,
+    marketUpdatedAt: data.updatedAt,
+  };
 }
 
 async function fetchDexScreener(mint: string): Promise<Partial<LaunchRecord>> {
@@ -84,54 +77,103 @@ function needsEnrichment(m: Partial<LaunchRecord>): boolean {
   return !m.image || !(m.name || m.symbol);
 }
 
+function hasUsefulVisual(m: Partial<LaunchRecord>): boolean {
+  return !!(m.image && (m.name || m.symbol));
+}
+
 async function sleep(ms: number) {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-/** Live path: pump.fun + metadata URI first, with retries until name/image land. */
-export async function enrichLaunchLive(launch: ParsedLaunch): Promise<LaunchRecord> {
+function toRecord(launch: ParsedLaunch, merged: Partial<LaunchRecord>): LaunchRecord {
+  const classification = classifyNarratives({
+    name: merged.name ?? launch.name,
+    symbol: merged.symbol ?? launch.symbol,
+    description: merged.description,
+    mint: launch.mint,
+  });
+
+  return {
+    ...launch,
+    ...merged,
+    name: merged.name ?? launch.name,
+    symbol: merged.symbol ?? launch.symbol,
+    image: merged.image ?? launch.image,
+    narratives: classification.narratives,
+    primaryNarrative: classification.primaryNarrative,
+    narrativeScore: classification.narrativeScore,
+  };
+}
+
+function mergePreferExisting(
+  base: Partial<LaunchRecord>,
+  next: Partial<LaunchRecord>,
+): Partial<LaunchRecord> {
+  return {
+    ...base,
+    ...next,
+    name: base.name ?? next.name,
+    symbol: base.symbol ?? next.symbol,
+    image: base.image ?? next.image,
+    description: base.description ?? next.description,
+    marketCapUsd: next.marketCapUsd ?? base.marketCapUsd,
+    volumeUsd1h: next.volumeUsd1h ?? base.volumeUsd1h,
+    volumeUsd24h: next.volumeUsd24h ?? base.volumeUsd24h,
+    txns24h: next.txns24h ?? base.txns24h,
+    holderCount: next.holderCount ?? base.holderCount,
+    bonded: next.bonded ?? base.bonded,
+    bondingProgressPct: next.bondingProgressPct ?? base.bondingProgressPct,
+    marketUpdatedAt: next.marketUpdatedAt ?? base.marketUpdatedAt,
+    volumeUpdatedAt: next.volumeUpdatedAt ?? base.volumeUpdatedAt,
+  };
+}
+
+/** Live path: pump.fun + metadata URI in parallel, progressive updates as soon as image lands. */
+export async function enrichLaunchLive(
+  launch: ParsedLaunch,
+  onProgress?: EnrichProgress,
+): Promise<LaunchRecord> {
   let merged: Partial<LaunchRecord> = {
     name: launch.name,
     symbol: launch.symbol,
     image: launch.image,
   };
 
-  if (launch.metadataUri) {
-    merged = { ...merged, ...(await fetchJsonMetadata(launch.metadataUri)) };
-  }
+  const emit = () => {
+    if (!onProgress) return;
+    if (!merged.image && !(merged.name || merged.symbol)) return;
+    onProgress(toRecord(launch, merged));
+  };
+
+  // First wave: metadata URI + pump.fun API in parallel (don't wait serially).
+  const [metaFirst, pumpFirst] = await Promise.all([
+    launch.metadataUri ? fetchJsonMetadata(launch.metadataUri) : Promise.resolve({}),
+    fetchPumpFun(launch.mint),
+  ]);
+  merged = mergePreferExisting(merged, metaFirst);
+  merged = mergePreferExisting(merged, pumpFirst);
+  emit();
 
   for (let i = 0; i < RETRY_MS.length; i++) {
     if (!needsEnrichment(merged)) break;
-
-    const pump = await fetchPumpFun(launch.mint);
-    merged = {
-      ...merged,
-      ...pump,
-      name: merged.name ?? pump.name,
-      symbol: merged.symbol ?? pump.symbol,
-      image: merged.image ?? pump.image,
-    };
-
-    if (!merged.image && launch.metadataUri) {
-      const meta = await fetchJsonMetadata(launch.metadataUri);
-      merged = {
-        ...merged,
-        ...meta,
-        name: merged.name ?? meta.name,
-        symbol: merged.symbol ?? meta.symbol,
-        image: merged.image ?? meta.image,
-      };
-    }
-
-    if (!needsEnrichment(merged)) break;
     await sleep(RETRY_MS[i]!);
+
+    const [pump, meta] = await Promise.all([
+      fetchPumpFun(launch.mint),
+      launch.metadataUri ? fetchJsonMetadata(launch.metadataUri) : Promise.resolve({}),
+    ]);
+    merged = mergePreferExisting(merged, pump);
+    merged = mergePreferExisting(merged, meta);
+    emit();
   }
 
   if (!merged.image || !merged.name) {
     const dex = await fetchDexScreener(launch.mint);
-    merged = { ...dex, ...merged, image: merged.image ?? dex.image };
+    merged = mergePreferExisting(merged, dex);
+    emit();
   }
 
+  // Volumes after visual data — don't block image.
   const vol = await fetchVolumeMetrics(launch.mint);
   if (vol) {
     merged = {
@@ -143,24 +185,7 @@ export async function enrichLaunchLive(launch: ParsedLaunch): Promise<LaunchReco
     };
   }
 
-  const classification = classifyNarratives({
-    name: merged.name ?? launch.name,
-    symbol: merged.symbol ?? launch.symbol,
-    description: merged.description,
-    mint: launch.mint,
-  });
-
-  const record: LaunchRecord = {
-    ...launch,
-    ...merged,
-    name: merged.name ?? launch.name,
-    symbol: merged.symbol ?? launch.symbol,
-    image: merged.image ?? launch.image,
-    narratives: classification.narratives,
-    primaryNarrative: classification.primaryNarrative,
-    narrativeScore: classification.narrativeScore,
-  };
-
+  const record = toRecord(launch, merged);
   cache.set(launch.mint, record);
   return record;
 }
@@ -198,3 +223,5 @@ export async function enrichLaunches(
 
   return out;
 }
+
+export { hasUsefulVisual };

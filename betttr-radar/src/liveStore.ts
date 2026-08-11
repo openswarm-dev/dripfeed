@@ -3,6 +3,8 @@ import { analyzeMetas, type MetaDashboard } from './metaEngine.js';
 import { loadLatestReport } from './report.js';
 import type { SocialSpark } from './socialSpark.js';
 import { refreshVolumesForMints } from './volume.js';
+import { refreshPumpCoinsForMints } from './market.js';
+import { loadPersistedState, schedulePersist } from './persist.js';
 
 export interface FeedStatus {
   geyser: boolean;
@@ -56,6 +58,11 @@ function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): Laun
     .slice(0, 5000);
 }
 
+function persistCurrent() {
+  if (!state) return;
+  schedulePersist(state.launches, state.sparks, state.liveLaunches);
+}
+
 function buildState(
   launches: LaunchRecord[],
   sparks: SocialSpark[],
@@ -107,9 +114,14 @@ function rebroadcast() {
 }
 
 export function initFromReport(): LiveState {
+  const persisted = loadPersistedState();
   const report = loadLatestReport();
-  const launches = report?.launches ?? [];
-  state = buildState(launches, [], 0);
+  const reportLaunches = report?.launches ?? [];
+  const launches = persisted
+    ? mergeLaunches(persisted.launches, reportLaunches)
+    : reportLaunches;
+  const sparks = persisted?.sparks ?? [];
+  state = buildState(launches, sparks, persisted?.liveLaunches ?? 0);
   return state;
 }
 
@@ -172,6 +184,7 @@ export function addLaunch(launch: LaunchRecord) {
     geyserStats: state.geyserStats,
     liveLaunches: state.liveLaunches,
   });
+  persistCurrent();
 }
 
 export function updateLaunch(launch: LaunchRecord) {
@@ -185,6 +198,7 @@ export function updateLaunch(launch: LaunchRecord) {
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
   rebroadcast();
+  persistCurrent();
 }
 
 export function addSpark(spark: SocialSpark) {
@@ -196,6 +210,7 @@ export function addSpark(spark: SocialSpark) {
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
   broadcast('spark', { spark, metas: state.metas, sparks: state.sparks });
+  persistCurrent();
 }
 
 /** Merge scan file into live buffer — never wipe live captures. */
@@ -208,9 +223,10 @@ export function refreshFromReport() {
   state.feeds.geyser = geyserConnected;
   state.feeds.tweetstream = tweetstreamConnected;
   rebroadcast();
+  persistCurrent();
 }
 
-/** Re-run meta engine (velocity decay, stage shifts) without new launches. */
+/** Re-run meta engine (stage shifts) without new launches. */
 export function recalcMetas() {
   const current = getState();
   state = buildState(current.launches, current.sparks, current.liveLaunches);
@@ -220,34 +236,68 @@ export function recalcMetas() {
 }
 
 let volumeRefreshRunning = false;
+let volumePollOffset = 0;
+const METRICS_BATCH = 36;
+const NEWEST_PRIORITY = 18;
 
-/** Poll DexScreener volume for recent launches — powers dying-rate meter. */
+/** Poll DexScreener + pump.fun for recent launches (newest always first, then rotate). */
 export async function refreshLaunchVolumes() {
   if (volumeRefreshRunning || !state) return;
   volumeRefreshRunning = true;
   try {
     const current = getState();
     const now = Math.floor(Date.now() / 1000);
-    const recent = current.launches
+    const recentSorted = current.launches
       .filter((l) => l.blockTime && now - l.blockTime <= 7200)
-      .slice(0, 36);
-    if (!recent.length) return;
+      .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0));
+    const newest = recentSorted.slice(0, NEWEST_PRIORITY).map((l) => l.mint);
+    const recent = recentSorted.map((l) => l.mint);
+    const metaMints = [
+      ...current.metas.active,
+      ...current.metas.forming,
+      ...(current.metas.emerging ?? []),
+    ].flatMap((m) => m.tokens.map((t) => t.mint));
+    const rotatePool = [...new Set([...recent, ...metaMints])].filter((m) => !newest.includes(m));
+    if (!newest.length && !rotatePool.length) return;
 
-    const mints = recent.map((l) => l.mint);
-    const volumes = await refreshVolumesForMints(mints, 4);
-    if (!volumes.size) return;
+    volumePollOffset = rotatePool.length ? volumePollOffset % rotatePool.length : 0;
+    const rotated: string[] = [];
+    const rotateCount = Math.max(0, METRICS_BATCH - newest.length);
+    for (let i = 0; i < rotateCount && rotatePool.length; i++) {
+      rotated.push(rotatePool[(volumePollOffset + i) % rotatePool.length]!);
+    }
+    if (rotatePool.length) {
+      volumePollOffset = (volumePollOffset + rotateCount) % rotatePool.length;
+    }
+
+    const mints = [...new Set([...newest, ...rotated])];
+
+    const [volumes, markets] = await Promise.all([
+      refreshVolumesForMints(mints, 10),
+      refreshPumpCoinsForMints(mints, 10),
+    ]);
+    if (!volumes.size && !markets.size) return;
 
     let changed = false;
     const launches = current.launches.map((l) => {
       const vol = volumes.get(l.mint);
-      if (!vol) return l;
+      const mkt = markets.get(l.mint);
+      if (!vol && !mkt) return l;
       changed = true;
       return {
         ...l,
-        volumeUsd24h: vol.volumeUsd24h ?? l.volumeUsd24h,
-        volumeUsd1h: vol.volumeUsd1h ?? l.volumeUsd1h,
-        txns24h: vol.txns24h ?? l.txns24h,
-        volumeUpdatedAt: vol.volumeUpdatedAt,
+        name: l.name ?? mkt?.name,
+        symbol: l.symbol ?? mkt?.symbol,
+        image: l.image ?? mkt?.image,
+        volumeUsd24h: vol?.volumeUsd24h ?? l.volumeUsd24h,
+        volumeUsd1h: vol?.volumeUsd1h ?? l.volumeUsd1h,
+        txns24h: vol?.txns24h ?? l.txns24h,
+        volumeUpdatedAt: vol?.volumeUpdatedAt ?? l.volumeUpdatedAt,
+        marketCapUsd: mkt?.marketCapUsd ?? l.marketCapUsd,
+        bonded: mkt?.bonded ?? l.bonded,
+        holderCount: mkt?.holderCount ?? l.holderCount,
+        bondingProgressPct: mkt?.bondingProgressPct ?? l.bondingProgressPct,
+        marketUpdatedAt: mkt?.updatedAt ?? l.marketUpdatedAt,
       };
     });
 
@@ -256,6 +306,7 @@ export async function refreshLaunchVolumes() {
       state.feeds.geyser = geyserConnected;
       state.feeds.tweetstream = tweetstreamConnected;
       rebroadcast();
+      persistCurrent();
     }
   } finally {
     volumeRefreshRunning = false;

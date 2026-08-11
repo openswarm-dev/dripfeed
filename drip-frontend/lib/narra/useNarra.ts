@@ -48,17 +48,31 @@ type PartialPayload = Partial<NarraReport & {
   liveSparks?: number;
 }>;
 
+function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
+  const byMint = new Map<string, LaunchRecord>();
+  for (const l of existing) byMint.set(l.mint, l);
+  for (const l of incoming) {
+    const prev = byMint.get(l.mint);
+    byMint.set(l.mint, prev ? { ...prev, ...l } : l);
+  }
+  return [...byMint.values()]
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
+    .slice(0, 5000);
+}
+
 function mergePayload(base: NarraState, data: PartialPayload): NarraState {
   let launches = base.launches;
   if (data.launches) {
-    launches = data.launches;
+    launches = mergeLaunchesByMint(base.launches, data.launches);
   } else if (data.launch) {
-    launches = [data.launch, ...base.launches].slice(0, 500);
+    launches = mergeLaunchesByMint(base.launches, [data.launch]);
   }
 
   let sparks = base.sparks;
   if (data.sparks) {
-    sparks = data.sparks;
+    const byId = new Map(base.sparks.map((s) => [s.id, s]));
+    for (const s of data.sparks) byId.set(s.id, s);
+    sparks = [...byId.values()].sort((a, b) => b.receivedAt - a.receivedAt).slice(0, 200);
   } else if (data.spark) {
     sparks = [data.spark, ...base.sparks].slice(0, 100);
   }
@@ -172,7 +186,9 @@ export function useNarra() {
         const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
         if (!res.ok) return;
         const report: NarraReport = await res.json();
-        if (!report.error) setState(reportToState(report));
+        if (!report.error) {
+          setState((prev) => mergePayload(prev ?? reportToState(report), report));
+        }
       } catch {
         /* ignore */
       }

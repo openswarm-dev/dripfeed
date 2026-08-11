@@ -15,6 +15,10 @@ export interface LaunchRecord extends ParsedLaunch {
   volumeUsd1h?: number;
   txns24h?: number;
   volumeUpdatedAt?: number;
+  bonded?: boolean;
+  holderCount?: number;
+  bondingProgressPct?: number;
+  marketUpdatedAt?: number;
   narratives: string[];
   primaryNarrative: string;
   narrativeScore: number;

@@ -13,7 +13,7 @@ export interface VolumeMetrics {
 
 const cache = new Map<string, { at: number; metrics: VolumeMetrics }>();
 const history = new Map<string, Array<{ at: number; volumeUsd24h: number; volumeUsd1h: number }>>();
-const CACHE_MS = 45_000;
+const CACHE_MS = 5_000;
 
 export async function fetchVolumeMetrics(mint: string): Promise<VolumeMetrics | null> {
   const cached = cache.get(mint);
@@ -87,7 +87,7 @@ export async function refreshVolumesForMints(
     for (const r of results) {
       if (r) out.set(r[0], r[1]);
     }
-    await new Promise((r) => setTimeout(r, 200));
+    await new Promise((r) => setTimeout(r, 60));
   }
   return out;
 }

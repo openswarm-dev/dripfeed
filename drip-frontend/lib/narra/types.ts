@@ -18,6 +18,9 @@ export interface MetaToken {
   volumeUsd24h?: number;
   volumeUsd1h?: number;
   txns24h?: number;
+  bonded?: boolean;
+  holderCount?: number;
+  bondingProgressPct?: number;
   blockTime?: number;
   ageSec?: number;
   creator: string;
@@ -104,6 +107,10 @@ export interface LaunchRecord {
   volumeUsd24h?: number;
   volumeUsd1h?: number;
   txns24h?: number;
+  bonded?: boolean;
+  holderCount?: number;
+  bondingProgressPct?: number;
+  marketUpdatedAt?: number;
   narratives: string[];
   primaryNarrative: string;
   narrativeScore: number;

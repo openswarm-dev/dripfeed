@@ -23,6 +23,9 @@ export interface MetaToken {
   volumeUsd24h?: number;
   volumeUsd1h?: number;
   txns24h?: number;
+  bonded?: boolean;
+  holderCount?: number;
+  bondingProgressPct?: number;
   blockTime?: number;
   ageSec?: number;
   creator: string;
@@ -536,6 +539,9 @@ function buildTrackFromGroup(
       volumeUsd24h: l.volumeUsd24h,
       volumeUsd1h: l.volumeUsd1h,
       txns24h: l.txns24h,
+      bonded: l.bonded,
+      holderCount: l.holderCount,
+      bondingProgressPct: l.bondingProgressPct,
       blockTime: l.blockTime ?? undefined,
       ageSec: l.blockTime ? now - l.blockTime : undefined,
       creator: l.creator,
@@ -705,10 +711,11 @@ function buildTimeline(
     sorted[0]!,
   );
   if ((top.marketCapUsd ?? 0) >= 8000) {
+    const topName = top.symbol ?? top.name ?? theme;
     events.push({
       at: top.blockTime ?? 0,
       stage: 'momentum',
-      label: `Money follows: ${top.symbol ?? top.name} hit ~$${Math.round(top.marketCapUsd ?? 0).toLocaleString()} mcap`,
+      label: `Money follows: ${topName} hit ~$${Math.round(top.marketCapUsd ?? 0).toLocaleString()} mcap`,
     });
   }
   events.push({

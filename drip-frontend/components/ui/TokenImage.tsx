@@ -6,10 +6,12 @@ export function TokenImage({
   src,
   size = 30,
   className = "",
+  priority = false,
 }: {
   src?: string;
   size?: number;
   className?: string;
+  priority?: boolean;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState(false);
@@ -36,8 +38,9 @@ export function TokenImage({
       <img
         src={src}
         alt=""
-        loading="lazy"
+        loading={priority ? "eager" : "lazy"}
         decoding="async"
+        fetchPriority={priority ? "high" : "auto"}
         onLoad={() => setLoaded(true)}
         onError={() => setError(true)}
         className={loaded ? "is-loaded" : ""}

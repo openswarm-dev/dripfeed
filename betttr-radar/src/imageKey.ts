@@ -2,8 +2,16 @@
 export function normalizeMediaUrl(url?: string): string | undefined {
   if (!url) return undefined;
   let u = url.trim();
-  if (u.startsWith('ipfs://')) return `https://ipfs.io/ipfs/${u.slice(7)}`;
+  if (u.startsWith('ipfs://')) {
+    return `https://cf-ipfs.com/ipfs/${u.slice(7)}`;
+  }
   if (u.startsWith('ar://')) return `https://arweave.net/${u.slice(5)}`;
+
+  // Prefer Cloudflare IPFS gateway over slow public ipfs.io
+  u = u.replace('https://ipfs.io/ipfs/', 'https://cf-ipfs.com/ipfs/');
+  u = u.replace('http://ipfs.io/ipfs/', 'https://cf-ipfs.com/ipfs/');
+  u = u.replace('https://gateway.pinata.cloud/ipfs/', 'https://cf-ipfs.com/ipfs/');
+
   return u;
 }
 
