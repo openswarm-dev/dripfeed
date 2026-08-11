@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { config, validateConfig } from './config.js';
 import {
@@ -122,6 +123,21 @@ function buildReportPayload() {
   };
 }
 
+function sendJson(req: http.IncomingMessage, res: http.ServerResponse, status: number, payload: unknown) {
+  const body = Buffer.from(JSON.stringify(payload));
+  const accept = req.headers['accept-encoding'] ?? '';
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  if (typeof accept === 'string' && accept.includes('gzip') && body.length > 2048) {
+    const gz = zlib.gzipSync(body);
+    res.writeHead(status, { 'Content-Encoding': 'gzip', 'Content-Length': gz.length });
+    res.end(gz);
+    return;
+  }
+  res.writeHead(status, { 'Content-Length': body.length });
+  res.end(body);
+}
+
 validateConfig();
 setTweetStreamAccounts(config.tweetstreamAccounts);
 
@@ -195,14 +211,12 @@ const server = http.createServer((req, res) => {
   }
 
   if (url === '/api/state') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ...getState(), geyserEnabled: config.geyserEnabled }));
+    sendJson(req, res, 200, { ...getState(), geyserEnabled: config.geyserEnabled });
     return;
   }
 
   if (url === '/api/report') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(buildReportPayload()));
+    sendJson(req, res, 200, buildReportPayload());
     return;
   }
 
