@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MetaStage, MetaTrack, LaunchRecord } from "@/lib/narra/types";
 import { fmtAge, fmtTime, formatCompact, capitalize, findMeta } from "@/lib/narra/format";
 import { BetttrCard, PanelTitle } from "@/components/ui/BetttrCard";
+import { TokenImage } from "@/components/ui/TokenImage";
 
 const LOGO_SRC = "/logos/Betttr.png";
 const STAGE_CLASS: Record<string, string> = {
@@ -70,13 +71,16 @@ function sortMetasByStage(metas: MetaTrack[], stageFilter: MetaStage | null, spa
   });
 }
 
-function ImageStrip({ images, max = 6, compact }: { images?: string[]; max?: number; compact?: boolean }) {
+function displayTheme(theme: string): string {
+  return theme.replace(/ — \d+ tokens sharing the same image$/, "").replace(/ · image copycats$/, "");
+}
+
+function ImageStrip({ images, max = 4 }: { images?: string[]; max?: number }) {
   if (!images?.length) return null;
   return (
-    <div className={`meta-images ${compact ? "meta-images--compact" : ""}`}>
+    <div className="meta-images meta-images--compact">
       {images.slice(0, max).map((url) => (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img key={url} src={url} alt="" loading="lazy" className="meta-thumb" />
+        <TokenImage key={url} src={url} size={20} />
       ))}
       {images.length > max && <span className="meta-more">+{images.length - max}</span>}
     </div>
@@ -109,21 +113,21 @@ function MetaCard({
       className={`meta-item meta-item--compact ${extraClass ?? ""} ${selected ? "selected" : ""} ${stageHit ? "stage-hit" : ""} ${stageDimmed ? "stage-dimmed" : ""}`}
       onClick={() => onSelect(m.id)}
     >
-      <ImageStrip images={m.sampleImages} max={4} compact />
-      <div className="row1">
-        <span className="theme">&quot;{m.theme}&quot;</span>
+      <div className="meta-row-top">
+        <TokenImage src={m.sampleImages[0]} size={28} />
+        <div className="meta-row-main">
+          <span className="theme">{displayTheme(m.theme)}</span>
+          <span className="meta-key-stat">
+            <strong>{m.launchCount}</strong> coins · <strong>{m.velocityPerHour}/hr</strong>
+            {m.totalVolumeUsd24h > 0 ? <> · <strong>${formatCompact(m.totalVolumeUsd24h)}</strong> vol</> : null}
+          </span>
+        </div>
         <span className={`stage-pill ${STAGE_CLASS[m.stage] ?? ""}`}>{m.stageLabel}</span>
       </div>
-      <div className="row2 meta-stats-line">
-        <span><strong>{m.launchCount}</strong> tok</span>
-        <span>{m.velocityPerHour}/hr</span>
-        {m.totalVolumeUsd24h ? <span>${formatCompact(m.totalVolumeUsd24h)}</span> : null}
-        <span className="meta-stats-sep">·</span>
-        <span className="age-tag">1st <strong data-ts={m.firstSeen}>{fmtAge(m.firstSeenAgoSec)}</strong></span>
-        <span className="age-tag">last <strong data-ts={m.lastSeen}>{fmtAge(m.lastSeenAgoSec)}</strong></span>
+      <div className="meta-row-sub">
+        <span>Last coin <strong data-ts={m.lastSeen}>{fmtAge(m.lastSeenAgoSec)}</strong> ago</span>
+        {m.uniqueCreators > 1 && <span>{m.uniqueCreators} deployers</span>}
       </div>
-      <DecayMeter m={m} compact />
-      <div className="psych">{m.psychologyLabel}</div>
     </button>
   );
 }
@@ -499,7 +503,8 @@ export default function NarraDashboard({
             </BetttrCard>
 
             <BetttrCard accent="forming">
-              <PanelTitle count={metas?.formingCount ?? 0} variant="warn">Forming</PanelTitle>
+              <PanelTitle count={metas?.formingCount ?? 0} variant="warn">Building</PanelTitle>
+              <p className="panel-hint">Same idea, multiple coins launching — watch these grow</p>
               <div className="card-scroll">
                 {!formingClusters.length ? (
                   <p className="empty">Watching for 2+ token clusters…</p>
@@ -518,7 +523,8 @@ export default function NarraDashboard({
             </BetttrCard>
 
             <BetttrCard accent="active">
-              <PanelTitle count={metas?.activeMetaCount ?? 0} variant="live">Active</PanelTitle>
+              <PanelTitle count={metas?.activeMetaCount ?? 0} variant="live">Hot right now</PanelTitle>
+              <p className="panel-hint">Confirmed metas with real volume and deployer activity</p>
               <div className="card-scroll">
                 {!metas?.active.length ? (
                   <p className="empty">No active metas in the last 6 hours</p>
@@ -536,10 +542,8 @@ export default function NarraDashboard({
             </BetttrCard>
 
             <BetttrCard accent="launch">
-              <PanelTitle count={launches.length} variant="live">Live creates</PanelTitle>
-              <p className="rate-line" id="launchRate">
-                {geyserStats?.perMinute ?? 0} creates/min · {geyserStats?.createsParsed ?? 0} parsed from {geyserStats?.pumpTxSeen ?? 0} pump txs
-              </p>
+              <PanelTitle count={launches.length} variant="live">New launches</PanelTitle>
+              <p className="panel-hint">Every pump.fun create as it happens — click ↗ to open</p>
               <div className="card-scroll">
                 {!launches.length ? (
                   <p className="empty">Waiting for CreateV2 stream…</p>
@@ -598,30 +602,25 @@ export default function NarraDashboard({
 
 function LaunchRow({ l }: { l: LaunchRecord }) {
   const label = l.symbol || l.name || l.mint.slice(0, 8);
-  const sub = l.name && l.symbol && l.name !== l.symbol ? l.name : `${l.mint.slice(0, 16)}…`;
+  const sub = l.name && l.symbol && l.name !== l.symbol ? l.name : null;
   const ageSec = l.blockTime ? Math.floor(Date.now() / 1000) - l.blockTime : null;
 
   return (
     <div className="launch-row">
-      {l.image ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={l.image} alt="" loading="lazy" />
-      ) : (
-        <div className="placeholder-img">?</div>
-      )}
+      <TokenImage src={l.image} size={30} />
       <div className="launch-meta">
         <div className="sym">
           {label}
           {l.isCreateV2 && <span className="v2-tag">V2</span>}
         </div>
-        <div className="name-line">{sub}</div>
+        {sub && <div className="name-line">{sub}</div>}
       </div>
       <div className="launch-side">
         {l.blockTime && (
           <span className="age-tag launch-age" data-ts={l.blockTime}>{fmtAge(ageSec)}</span>
         )}
         {l.volumeUsd1h ? <span className="vol-tag">${formatCompact(l.volumeUsd1h)}</span> : null}
-        <a href={`https://pump.fun/coin/${l.mint}`} target="_blank" rel="noopener noreferrer" title="Open on pump.fun" data-cursor-hover>↗</a>
+        <a href={`https://pump.fun/coin/${l.mint}`} target="_blank" rel="noopener noreferrer" title="Open on pump.fun">↗</a>
       </div>
     </div>
   );
@@ -656,13 +655,8 @@ function MetaDetail({ m }: { m: MetaTrack }) {
         <h3>Deploying</h3>
         <div className="deploy-grid">
           {m.tokens.slice(0, 10).map((t) => (
-            <a key={t.mint} className="deploy-card" href={`https://pump.fun/coin/${t.mint}`} target="_blank" rel="noopener noreferrer" data-cursor-hover>
-              {t.image ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={t.image} alt="" className="deploy-img" loading="lazy" />
-              ) : (
-                <div className="deploy-img placeholder">?</div>
-              )}
+            <a key={t.mint} className="deploy-card" href={`https://pump.fun/coin/${t.mint}`} target="_blank" rel="noopener noreferrer">
+              <TokenImage src={t.image} size={48} className="deploy-img-wrap" />
               <div className="deploy-label">{t.symbol ?? t.name ?? t.mint.slice(0, 6)}</div>
               {t.blockTime && (
                 <div className="deploy-age" data-ts={t.blockTime}>{fmtAge(t.ageSec)}</div>

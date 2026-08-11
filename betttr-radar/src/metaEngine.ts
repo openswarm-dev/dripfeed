@@ -239,11 +239,114 @@ function tracksOverlap(a: MetaTrack, b: MetaTrack): boolean {
   return overlap >= MIN_IMAGE_CLUSTER && overlap >= minSize * 0.5;
 }
 
-function preferTrack(a: MetaTrack, b: MetaTrack): MetaTrack {
-  if (a.id.startsWith('img-') && !b.id.startsWith('img-')) return a;
-  if (b.id.startsWith('img-') && !a.id.startsWith('img-')) return b;
-  if (a.launchCount !== b.launchCount) return a.launchCount > b.launchCount ? a : b;
-  return a.attentionScore >= b.attentionScore ? a : b;
+/** Same image asset across clusters (e.g. term "fomo" + image cluster "FF"). */
+function tracksShareImage(a: MetaTrack, b: MetaTrack): boolean {
+  const keysA = new Set<string>();
+  for (const t of a.tokens) {
+    const k = imageClusterKey(t.image);
+    if (k) keysA.add(k);
+  }
+  if (!keysA.size) return false;
+  for (const t of b.tokens) {
+    const k = imageClusterKey(t.image);
+    if (k && keysA.has(k)) return true;
+  }
+  return false;
+}
+
+function shouldMergeTracks(a: MetaTrack, b: MetaTrack): boolean {
+  return tracksOverlap(a, b) || tracksShareImage(a, b);
+}
+
+function dominantSymbol(launches: LaunchRecord[]): string {
+  const counts = new Map<string, number>();
+  for (const l of launches) {
+    const s = (l.symbol || l.name || '').trim();
+    if (s.length < 2) continue;
+    const k = s.toLowerCase();
+    counts.set(k, (counts.get(k) ?? 0) + 1);
+  }
+  let best = '';
+  let bestN = 0;
+  for (const [k, n] of counts) {
+    if (n > bestN) {
+      best = k;
+      bestN = n;
+    }
+  }
+  if (best) return best;
+  const first = launches[0];
+  return first?.symbol || first?.name || 'visual';
+}
+
+function mergeOverlappingTracks(
+  tracks: MetaTrack[],
+  recent: LaunchRecord[],
+  now: number,
+  sparks: SocialSpark[],
+  live: boolean,
+): MetaTrack[] {
+  if (tracks.length <= 1) return tracks;
+
+  const parent = tracks.map((_, i) => i);
+  const find = (i: number): number => {
+    let root = i;
+    while (parent[root] !== root) root = parent[root]!;
+    let cur = i;
+    while (parent[cur] !== cur) {
+      const next = parent[cur]!;
+      parent[cur] = root;
+      cur = next;
+    }
+    return root;
+  };
+  const union = (i: number, j: number) => {
+    const ri = find(i);
+    const rj = find(j);
+    if (ri !== rj) parent[rj] = ri;
+  };
+
+  for (let i = 0; i < tracks.length; i++) {
+    for (let j = i + 1; j < tracks.length; j++) {
+      if (shouldMergeTracks(tracks[i]!, tracks[j]!)) union(i, j);
+    }
+  }
+
+  const groups = new Map<number, number[]>();
+  for (let i = 0; i < tracks.length; i++) {
+    const r = find(i);
+    if (!groups.has(r)) groups.set(r, []);
+    groups.get(r)!.push(i);
+  }
+
+  const launchByMint = new Map(recent.map((l) => [l.mint, l]));
+  const merged: MetaTrack[] = [];
+
+  for (const indices of groups.values()) {
+    if (indices.length === 1) {
+      merged.push(tracks[indices[0]!]!);
+      continue;
+    }
+
+    const mints = new Set<string>();
+    let imageCluster = false;
+    for (const idx of indices) {
+      const t = tracks[idx]!;
+      if (t.id.startsWith('img-')) imageCluster = true;
+      for (const tok of t.tokens) mints.add(tok.mint);
+    }
+
+    const deduped = [...mints]
+      .map((m) => launchByMint.get(m))
+      .filter((l): l is LaunchRecord => !!l);
+    if (!deduped.length) continue;
+
+    const label = dominantSymbol(deduped);
+    const track = buildTrackFromGroup(label, deduped, now, sparks, imageCluster, live);
+    if (track) merged.push(track);
+  }
+
+  return merged;
 }
 
 function uniqueCreators(launches: LaunchRecord[]): number {
@@ -464,7 +567,9 @@ function buildTrackFromGroup(
 
   return {
     id: `${imageCluster ? 'img' : 'term'}-${clusterKey}`,
-    theme: imageCluster ? `${theme} · image copycats` : theme,
+    theme: imageCluster
+      ? `${theme.toUpperCase()} — ${deduped.length} tokens sharing the same image`
+      : theme,
     stage,
     stageIndex: STAGE_INDEX[stage],
     stageLabel: stageDef.label,
@@ -693,10 +798,8 @@ export function analyzeMetas(
   };
 
   for (const deduped of imageGroups) {
-    const sorted = [...deduped].sort((a, b) => (a.blockTime ?? 0) - (b.blockTime ?? 0));
-    const original = sorted[0];
-    const label = original?.symbol ?? original?.name ?? 'visual';
-    addTrack(buildTrackFromGroup(String(label), deduped, now, sparks, true, live));
+    const label = dominantSymbol(deduped);
+    addTrack(buildTrackFromGroup(label, deduped, now, sparks, true, live));
   }
 
   for (const [theme, group] of termMap) {
@@ -717,19 +820,8 @@ export function analyzeMetas(
 
   tracks.sort((a, b) => b.attentionScore - a.attentionScore);
 
-  const suppressed = new Set<number>();
-  for (let i = 0; i < tracks.length; i++) {
-    if (suppressed.has(i)) continue;
-    for (let j = i + 1; j < tracks.length; j++) {
-      if (suppressed.has(j)) continue;
-      if (!tracksOverlap(tracks[i]!, tracks[j]!)) continue;
-      const keep = preferTrack(tracks[i]!, tracks[j]!);
-      suppressed.add(keep === tracks[i] ? j : i);
-    }
-  }
-
-  const dedupedTracks = tracks
-    .filter((_, i) => !suppressed.has(i))
+  const dedupedTracks = mergeOverlappingTracks(tracks, recent, now, sparks, live)
+    .sort((a, b) => b.attentionScore - a.attentionScore)
     .filter((c, i, arr) =>
       !arr.some(
         (other, j) =>
