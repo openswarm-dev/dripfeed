@@ -120,16 +120,16 @@ const MIN_UNIQUE_CREATORS = 3;
 /** Min tokens sharing the same image to form a visual copycat meta (title ignored) */
 const MIN_IMAGE_CLUSTER = 5;
 
-/** Live-mode thresholds — real metas need size; confirmed ones stick around */
+/** Live-mode thresholds — surface early stages; confirmed metas still need size */
 const LIVE = {
   lookbackHours: 36,
-  minEmergingTokens: 3,
+  minEmergingTokens: 2,
   emergingWindowSec: 60 * 60,
-  minFormingTokens: 5,
+  minFormingTokens: 4,
   minFormingVelocity: 2,
   minMetaTokens: 8,
   minUniqueCreators: 3,
-  minImageCluster: 6,
+  minImageCluster: 5,
   fadeAfterHours: 10,
   activeAfterHours: 18,
 };
@@ -246,23 +246,69 @@ function tracksOverlap(a: MetaTrack, b: MetaTrack): boolean {
   return overlap >= MIN_IMAGE_CLUSTER && overlap >= minSize * 0.5;
 }
 
-/** Same image asset across clusters (e.g. term "fomo" + image cluster "FF"). */
+/** Same image asset across clusters — only merge if enough shared image mints. */
 function tracksShareImage(a: MetaTrack, b: MetaTrack): boolean {
-  const keysA = new Set<string>();
+  const keysA = new Map<string, number>();
   for (const t of a.tokens) {
     const k = imageClusterKey(t.image);
-    if (k) keysA.add(k);
+    if (k) keysA.set(k, (keysA.get(k) ?? 0) + 1);
   }
   if (!keysA.size) return false;
+
+  let shared = 0;
   for (const t of b.tokens) {
     const k = imageClusterKey(t.image);
-    if (k && keysA.has(k)) return true;
+    if (k && keysA.has(k)) shared++;
   }
-  return false;
+  // Require real overlap — a single shared image mint must not swallow unrelated term tokens.
+  return shared >= 3;
 }
 
 function shouldMergeTracks(a: MetaTrack, b: MetaTrack): boolean {
   return tracksOverlap(a, b) || tracksShareImage(a, b);
+}
+
+/** When merging, only keep mints that belong to the shared image key(s) if this is an image merge. */
+function mintsForMergedGroup(
+  tracks: MetaTrack[],
+  indices: number[],
+  launchByMint: Map<string, LaunchRecord>,
+): { deduped: LaunchRecord[]; imageCluster: boolean } {
+  let imageCluster = false;
+  const sharedKeys = new Set<string>();
+  const keyCounts = new Map<string, number>();
+
+  for (const idx of indices) {
+    const t = tracks[idx]!;
+    if (t.id.startsWith('img-')) imageCluster = true;
+    for (const tok of t.tokens) {
+      const k = imageClusterKey(tok.image);
+      if (k) keyCounts.set(k, (keyCounts.get(k) ?? 0) + 1);
+    }
+  }
+
+  for (const [k, n] of keyCounts) {
+    if (n >= 3) sharedKeys.add(k);
+  }
+
+  const mints = new Set<string>();
+  if (imageCluster && sharedKeys.size) {
+    for (const idx of indices) {
+      for (const tok of tracks[idx]!.tokens) {
+        const k = imageClusterKey(tok.image);
+        if (k && sharedKeys.has(k)) mints.add(tok.mint);
+      }
+    }
+  } else {
+    for (const idx of indices) {
+      for (const tok of tracks[idx]!.tokens) mints.add(tok.mint);
+    }
+  }
+
+  const deduped = [...mints]
+    .map((m) => launchByMint.get(m))
+    .filter((l): l is LaunchRecord => !!l);
+  return { deduped, imageCluster };
 }
 
 function dominantSymbol(launches: LaunchRecord[]): string {
@@ -335,17 +381,7 @@ function mergeOverlappingTracks(
       continue;
     }
 
-    const mints = new Set<string>();
-    let imageCluster = false;
-    for (const idx of indices) {
-      const t = tracks[idx]!;
-      if (t.id.startsWith('img-')) imageCluster = true;
-      for (const tok of t.tokens) mints.add(tok.mint);
-    }
-
-    const deduped = [...mints]
-      .map((m) => launchByMint.get(m))
-      .filter((l): l is LaunchRecord => !!l);
+    const { deduped, imageCluster } = mintsForMergedGroup(tracks, indices, launchByMint);
     if (!deduped.length) continue;
 
     const label = dominantSymbol(deduped);
@@ -508,16 +544,43 @@ function buildTrackFromGroup(
     recentWindow.length,
     live,
   );
+  const linkedSpark = findSparkForTheme(theme, sparks);
+  const isEarlyNaming = live && deduped.length >= 2 && (now - lastSeen) <= 3600;
+  const isSparkSeed = live && deduped.length === 1 && (!!linkedSpark || (now - lastSeen) <= 600);
 
-  if (!isMeta && !isForming && !isEmerging) return null;
+  if (!isMeta && !isForming && !isEmerging && !isEarlyNaming && !isSparkSeed) return null;
 
-  const mcaps = deduped.map((l) => l.marketCapUsd ?? 0).filter((m) => m > 0);
+  // Image clusters: only keep tokens that actually share the dominant image key.
+  let members = deduped;
+  if (imageCluster) {
+    const keyCounts = new Map<string, number>();
+    for (const l of deduped) {
+      const k = imageClusterKey(l.image);
+      if (k) keyCounts.set(k, (keyCounts.get(k) ?? 0) + 1);
+    }
+    let bestKey = '';
+    let bestN = 0;
+    for (const [k, n] of keyCounts) {
+      if (n > bestN) {
+        bestKey = k;
+        bestN = n;
+      }
+    }
+    if (bestKey) {
+      members = deduped.filter((l) => imageClusterKey(l.image) === bestKey);
+      if (members.length < 2) members = deduped;
+    }
+  }
+
+  const mcaps = members.map((l) => l.marketCapUsd ?? 0).filter((m) => m > 0);
   const totalMcap = mcaps.reduce((a, b) => a + b, 0);
   const avgMcap = mcaps.length ? totalMcap / mcaps.length : 0;
   const topMcap = mcaps.length ? Math.max(...mcaps) : 0;
+  const memberCount = members.length;
+  const memberCreators = uniqueCreators(members);
 
-  const stage = inferStage({
-    count: deduped.length,
+  const rawStage = inferStage({
+    count: memberCount,
     firstSeen,
     lastSeen,
     now,
@@ -526,17 +589,22 @@ function buildTrackFromGroup(
     avgMcap,
     topMcap,
   }, live);
+  const clusterKeyEarly = imageCluster
+    ? (imageClusterKey(members[0]?.image) ?? theme.replace(/\s+/g, '-'))
+    : theme.replace(/\s+/g, '-');
+  const trackId = `${imageCluster ? 'img' : 'term'}-${clusterKeyEarly}`;
+  const stage = stabilizeStage(trackId, rawStage, now);
 
   const stageDef = STAGE_DEFS.find((s) => s.id === stage)!;
-  const psych = imageCluster && deduped.length >= 2
+  const psych = imageCluster && memberCount >= 2
     ? {
         mode: 'copycat_wave' as PsychologyMode,
-        mindset: `${deduped.length} tokens reusing the same image — visual copycat wave`,
+        mindset: `${memberCount} tokens reusing the same image — visual copycat wave`,
       }
-    : inferPsychology(deduped.length, velocityPer10Min, avgMcap, stage);
+    : inferPsychology(memberCount, velocityPer10Min, avgMcap, stage);
   const recencyBoost = Math.max(0, 12 - (now - lastSeen) / 300);
 
-  const tokens: MetaToken[] = deduped
+  const tokens: MetaToken[] = members
     .sort((a, b) => (b.marketCapUsd ?? 0) - (a.marketCapUsd ?? 0))
     .slice(0, 24)
     .map((l) => ({
@@ -557,14 +625,14 @@ function buildTrackFromGroup(
       twitter: (l as LaunchRecord & { twitter?: string }).twitter,
     }));
 
-  const trend = computeTrendMetrics(deduped, now, firstSeen, lastSeen, spanHours, live);
+  const trend = computeTrendMetrics(members, now, firstSeen, lastSeen, spanHours, live);
 
   const sampleImages = [
     ...new Set(tokens.map((t) => t.image).filter(Boolean) as string[]),
   ].slice(0, 8);
 
   const hoursSinceLast = (now - lastSeen) / 3600;
-  const isNew = (isForming || isEmerging) && ageHours <= 6 && stage !== 'fade';
+  const isNew = (isForming || isEmerging || isEarlyNaming) && ageHours <= 6 && stage !== 'fade';
   const activeWindow = live ? LIVE.activeAfterHours : 24;
   const isActive = isMeta && (
     hoursSinceLast <= activeWindow ||
@@ -574,23 +642,21 @@ function buildTrackFromGroup(
     stage === 'peak'
   );
   const attentionScore = scoreMeta({
-    launchCount: deduped.length,
+    launchCount: memberCount,
     velocityPer10Min,
     totalMarketCapUsd: totalMcap,
     recencyBoost,
     stageIndex: STAGE_INDEX[stage],
-  }) + (creators >= MIN_UNIQUE_CREATORS ? 10 : 0) + (imageCluster ? 15 : 0);
+  }) + (memberCreators >= MIN_UNIQUE_CREATORS ? 10 : 0) + (imageCluster ? 15 : 0);
 
   const isNotable = isMeta && (stage === 'copycat' || stage === 'momentum' || effectiveVelocity >= 4);
 
-  const clusterKey = imageCluster
-    ? (imageClusterKey(deduped[0]?.image) ?? theme.replace(/\s+/g, '-'))
-    : theme.replace(/\s+/g, '-');
+  const clusterKey = clusterKeyEarly;
 
   return {
-    id: `${imageCluster ? 'img' : 'term'}-${clusterKey}`,
+    id: trackId,
     theme: imageCluster
-      ? `${theme.toUpperCase()} — ${deduped.length} tokens sharing the same image`
+      ? `${theme.toUpperCase()} — ${memberCount} tokens sharing the same image`
       : theme,
     stage,
     stageIndex: STAGE_INDEX[stage],
@@ -599,7 +665,7 @@ function buildTrackFromGroup(
     psychology: psych.mode,
     psychologyLabel: PSYCH_LABELS[psych.mode],
     traderMindset: psych.mindset,
-    launchCount: deduped.length,
+    launchCount: memberCount,
     velocityPerHour: Math.round(effectiveVelocity * 10) / 10,
     velocityPer10Min: Math.round(velocityPer10Min * 10) / 10,
     firstSeen,
@@ -610,10 +676,10 @@ function buildTrackFromGroup(
     avgMarketCapUsd: Math.round(avgMcap),
     topMarketCapUsd: Math.round(topMcap),
     moneySignal: totalMcap > 0
-      ? `$${totalMcap.toLocaleString()} combined mcap · ${creators} deployers`
-      : `${deduped.length} deploys · ${creators} wallets — mcap pending`,
+      ? `$${totalMcap.toLocaleString()} combined mcap · ${memberCreators} deployers`
+      : `${memberCount} deploys · ${memberCreators} wallets — mcap pending`,
     newsSignal: (() => {
-      const linked = findSparkForTheme(theme, sparks);
+      const linked = linkedSpark ?? findSparkForTheme(theme, sparks);
       if (linked) {
         return `@${linked.handle} · "${linked.text.slice(0, 120)}${linked.text.length > 120 ? '…' : ''}"`;
       }
@@ -623,7 +689,7 @@ function buildTrackFromGroup(
     isNotable,
     isActive,
     attentionScore,
-    uniqueCreators: creators,
+    uniqueCreators: memberCreators,
     sampleImages,
     tokens,
     timeline: buildTimeline(theme, tokens, stage),
@@ -653,22 +719,47 @@ function inferStage(
   // Confirmed metas stick in fade only after a long quiet stretch.
   if (opts.count >= 3 && hoursSinceLast > fadeAfter) return 'fade';
 
-  // Peak / money — needs real size, not a 3-coin cluster.
-  if (opts.count >= 10 && opts.velocityPerHour >= 2 &&
+  // Peak / money — needs real size + sustained signal (avoid flapping on one volume poll).
+  if (opts.count >= 12 && opts.velocityPerHour >= 3 &&
       opts.velocityRecentHour < opts.velocityPerHour * peakRatio) return 'peak';
-  if (opts.avgMcap >= 8000 && opts.count >= 8) return 'momentum';
-  if (opts.topMcap >= 20000 && opts.count >= 6) return 'momentum';
-  if (live && opts.count >= 10 && opts.velocityRecentHour >= 4) return 'momentum';
-  if (opts.count >= 12 && opts.velocityRecentHour >= 3) return 'copycat';
-  if (opts.count >= 8 && opts.velocityRecentHour >= 3) return 'copycat';
+  if (opts.avgMcap >= 12_000 && opts.count >= 8) return 'momentum';
+  if (opts.topMcap >= 35_000 && opts.count >= 8) return 'momentum';
+  if (live && opts.count >= 12 && opts.velocityRecentHour >= 5) return 'momentum';
+  if (opts.count >= 10 && opts.velocityRecentHour >= 2) return 'copycat';
+  if (opts.count >= 8) return 'copycat';
 
   // Recognition is the main mid-stage — 3–7 related launches noticing the theme.
-  // Do NOT jump these straight to copycat just because velocity ticks up.
   if (opts.count >= 3 && opts.count < 8) return 'recognition';
   if (opts.count >= 3 && hoursSinceFirst <= (live ? 12 : 24) && opts.count < 10) return 'recognition';
 
   if (opts.count >= 2) return 'naming';
   return 'spark';
+}
+
+/** Hold stage for a few minutes so pipeline counts don't spike/crash every poll. */
+const STAGE_STICKY_SEC = 180;
+const stageSticky = new Map<string, { stage: MetaStage; until: number }>();
+
+function stabilizeStage(trackId: string, next: MetaStage, now: number): MetaStage {
+  const prev = stageSticky.get(trackId);
+  if (!prev) {
+    stageSticky.set(trackId, { stage: next, until: now + STAGE_STICKY_SEC });
+    return next;
+  }
+
+  // Always allow forward progress or fade.
+  if (STAGE_INDEX[next] > STAGE_INDEX[prev.stage] || next === 'fade') {
+    stageSticky.set(trackId, { stage: next, until: now + STAGE_STICKY_SEC });
+    return next;
+  }
+
+  // Demotions only after sticky window.
+  if (now >= prev.until && next !== prev.stage) {
+    stageSticky.set(trackId, { stage: next, until: now + STAGE_STICKY_SEC });
+    return next;
+  }
+
+  return prev.stage;
 }
 
 function buildNewsSignal(tokens: MetaToken[], sparks: SocialSpark[]): string {

@@ -2,9 +2,10 @@ import type { LaunchRecord } from './fetchLaunches.js';
 import { analyzeMetas, type MetaDashboard } from './metaEngine.js';
 import { loadLatestReport } from './report.js';
 import type { SocialSpark } from './socialSpark.js';
-import { refreshVolumesForMints } from './volume.js';
-import { refreshPumpCoinsForMints } from './market.js';
-import { loadPersistedState, schedulePersist } from './persist.js';
+import { refreshVolumesForMints, fetchVolumeMetrics } from './volume.js';
+import { refreshPumpCoinsForMints, fetchPumpCoin } from './market.js';
+import { hydrateFromDb, initPersist, loadPersistedState, schedulePersist } from './persist.js';
+import { normalizeMediaUrl } from './imageKey.js';
 
 export interface FeedStatus {
   geyser: boolean;
@@ -152,6 +153,60 @@ export function initFromReport(): LiveState {
   return state;
 }
 
+/** Connect Postgres + prefer hydrated launches over file when available. */
+export async function initLiveStore(): Promise<LiveState> {
+  await initPersist();
+  const current = initFromReport();
+  const fromDb = await hydrateFromDb();
+  if (!fromDb?.launches.length) return current;
+
+  const launches = mergeLaunches(current.launches, fromDb.launches);
+  const sparkMap = new Map<string, SocialSpark>();
+  for (const s of fromDb.sparks) sparkMap.set(s.id, s);
+  for (const s of current.sparks) sparkMap.set(s.id, s);
+  const sparks = [...sparkMap.values()]
+    .sort((a, b) => b.receivedAt - a.receivedAt)
+    .slice(0, 200);
+  state = buildState(
+    launches,
+    sparks,
+    Math.max(current.liveLaunches, fromDb.liveLaunches),
+  );
+  return state;
+}
+
+/** On-demand pump.fun + DexScreener refresh for hover panels. */
+export async function forceRefreshLaunch(mint: string): Promise<LaunchRecord | null> {
+  const current = getState();
+  const existing = current.launches.find((l) => l.mint === mint);
+  if (!existing) return null;
+
+  const [pump, vol] = await Promise.all([
+    fetchPumpCoin(mint),
+    fetchVolumeMetrics(mint),
+  ]);
+
+  const patched: LaunchRecord = mergeLaunchRecord(existing, {
+    ...existing,
+    name: pump?.name,
+    symbol: pump?.symbol,
+    description: pump?.description,
+    image: normalizeMediaUrl(pump?.image) ?? existing.image,
+    marketCapUsd: pump?.marketCapUsd,
+    bonded: pump?.bonded,
+    holderCount: pump?.holderCount,
+    bondingProgressPct: pump?.bondingProgressPct,
+    marketUpdatedAt: pump?.updatedAt,
+    volumeUsd24h: vol?.volumeUsd24h,
+    volumeUsd1h: vol?.volumeUsd1h,
+    txns24h: vol?.txns24h,
+    volumeUpdatedAt: vol?.volumeUpdatedAt,
+  });
+
+  updateLaunch(patched);
+  return getState().launches.find((l) => l.mint === mint) ?? patched;
+}
+
 export function getState(): LiveState {
   if (!state) return initFromReport();
   state.feeds.geyser = geyserConnected;
@@ -267,6 +322,16 @@ let volumePollOffset = 0;
 const METRICS_BATCH = 36;
 const NEWEST_PRIORITY = 18;
 
+function needsMetrics(l: LaunchRecord): boolean {
+  return (
+    l.marketCapUsd == null
+    || l.holderCount == null
+    || l.volumeUsd1h == null
+    || l.txns24h == null
+    || l.bondingProgressPct == null
+  );
+}
+
 /** Poll DexScreener + pump.fun for recent launches (newest always first, then rotate). */
 export async function refreshLaunchVolumes() {
   if (volumeRefreshRunning || !state) return;
@@ -277,7 +342,11 @@ export async function refreshLaunchVolumes() {
     const recentSorted = current.launches
       .filter((l) => l.blockTime && now - l.blockTime <= 7200)
       .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0));
-    const newest = recentSorted.slice(0, NEWEST_PRIORITY).map((l) => l.mint);
+    const missingMetrics = recentSorted.filter(needsMetrics).slice(0, NEWEST_PRIORITY).map((l) => l.mint);
+    const newest = [
+      ...missingMetrics,
+      ...recentSorted.slice(0, NEWEST_PRIORITY).map((l) => l.mint),
+    ].filter((m, i, arr) => arr.indexOf(m) === i).slice(0, NEWEST_PRIORITY);
     const recent = recentSorted.map((l) => l.mint);
     const metaMints = [
       ...current.metas.active,

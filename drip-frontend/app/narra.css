@@ -82,28 +82,19 @@
   inset: 0;
 }
 
-/* Progress rail (vault-style) */
+/* Progress rail removed — was a thin border line above the navbar */
 .radar-progress {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 60;
-  height: 2px;
-  background: rgba(255, 255, 255, 0.04);
+  display: none;
 }
 
 .radar-progress__fill {
-  height: 100%;
-  width: 100%;
-  transform-origin: left;
-  transition: transform 0.6s ease;
+  display: none;
 }
 
 /* ── Fixed nav ── */
 .radar-nav {
   position: fixed;
-  top: 2px;
+  top: 0;
   left: 0;
   right: 0;
   z-index: 50;
@@ -1344,7 +1335,7 @@
 .radar-hover-overlay {
   position: fixed;
   z-index: 10001;
-  width: min(340px, calc(100vw - 24px));
+  width: min(520px, calc(100vw - 24px));
   pointer-events: auto;
   animation: overlay-in 0.18s ease-out;
 }
@@ -1399,11 +1390,21 @@
   gap: 8px;
 }
 
+.hover-overlay-grid--row {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 6px;
+}
+
 .hover-overlay-grid > div {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--radar-border);
   border-radius: 8px;
   padding: 8px;
+}
+
+.hover-overlay-grid--row > div {
+  padding: 6px 4px;
+  text-align: center;
 }
 
 .hover-overlay-grid .lbl {
@@ -1416,10 +1417,20 @@
   margin-bottom: 4px;
 }
 
+.hover-overlay-grid--row .lbl {
+  font-size: 8px;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
 .hover-overlay-grid .val {
   font-size: 14px;
   font-weight: 700;
   color: var(--radar-cyan);
+}
+
+.hover-overlay-grid--row .val {
+  font-size: 12px;
 }
 
 .hover-overlay-psych {
@@ -1879,10 +1890,53 @@ button.timeline-event {
   .radar-pill--stats { display: none; }
 }
 
+@media (max-width: 900px) {
+  :root {
+    --radar-pad: 10px;
+    --radar-gap: 8px;
+    --radar-nav-h: 48px;
+    --radar-context-h: auto;
+  }
+
+  .row-main,
+  .row-top {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .panel {
+    min-height: 280px;
+    max-height: none;
+  }
+
+  .radar-brand__logo {
+    height: 34px;
+  }
+
+  .radar-brand__title {
+    font-size: 10px;
+    letter-spacing: 0.1em;
+  }
+
+  .radar-pill {
+    font-size: 10px;
+    padding: 4px 8px;
+  }
+
+  .hover-overlay-grid--row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .radar-hover-overlay {
+    max-width: calc(100vw - 24px);
+  }
+}
+
 @media (max-width: 700px) {
   :root {
-    --radar-pad: 12px;
-    --radar-gap: 10px;
+    --radar-pad: 8px;
+    --radar-gap: 8px;
     --radar-context-h: auto;
   }
 
@@ -1896,6 +1950,16 @@ button.timeline-event {
 
   .stage-step {
     flex: 1 1 calc(33% - 6px);
+    min-width: 0;
+    padding: 6px 4px;
+  }
+
+  .stage-step .stage-count {
+    font-size: 16px;
+  }
+
+  .stage-step .stage-label {
+    font-size: 8px;
   }
 
   .detail-grid {
@@ -1903,6 +1967,19 @@ button.timeline-event {
   }
 
   .hero-theme {
-    font-size: 18px;
+    font-size: 16px;
+  }
+
+  .meta-row-main,
+  .launch-row {
+    gap: 6px;
+  }
+
+  .panel-title {
+    font-size: 11px;
+  }
+
+  .app {
+    padding-top: calc(var(--radar-nav-h) + 6px);
   }
 }

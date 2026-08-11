@@ -246,12 +246,14 @@ export default function NarraDashboard({
   loading,
   loaderDone: _loaderDone,
   onLoaderDone,
+  onRefreshLaunch,
 }: {
   state: import("@/lib/narra/types").NarraState | null;
   error: string | null;
   loading: boolean;
   loaderDone: boolean;
   onLoaderDone: () => void;
+  onRefreshLaunch?: (mint: string) => void;
 }) {
   const [showLoader, setShowLoader] = useState(true);
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
@@ -262,6 +264,7 @@ export default function NarraDashboard({
     | null
   >(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRefreshRef = useRef<string | null>(null);
 
   const showMetaHover = (m: MetaTrack, el: HTMLElement) => {
     if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
@@ -271,6 +274,10 @@ export default function NarraDashboard({
   const showLaunchHover = (l: LaunchRecord, el: HTMLElement) => {
     if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
     setHoverTarget({ kind: "launch", mint: l.mint, rect: el.getBoundingClientRect() });
+    if (onRefreshLaunch && lastRefreshRef.current !== l.mint) {
+      lastRefreshRef.current = l.mint;
+      onRefreshLaunch(l.mint);
+    }
   };
 
   const hideHover = () => {
@@ -484,27 +491,12 @@ export default function NarraDashboard({
     }
   }, [timelineEvents]);
 
-  const progressPct = useMemo(() => {
-    if (!metas) return 8;
-    const active = metas.activeMetaCount ?? 0;
-    const forming = metas.formingCount ?? 0;
-    const rate = geyserStats?.perMinute ?? 0;
-    return Math.min(100, 12 + active * 14 + forming * 8 + rate * 3);
-  }, [metas, geyserStats?.perMinute]);
-
   if (showLoader) {
     return <NarraLoader onDone={dismissLoader} />;
   }
 
   return (
     <div className="radar-root">
-      <div className="radar-progress" aria-hidden="true">
-        <div
-          className="radar-progress__fill rainbow-bg"
-          style={{ transform: `scaleX(${progressPct / 100})` }}
-        />
-      </div>
-
       <nav className="radar-nav">
         <div className="radar-nav__inner">
           <div className="radar-brand">

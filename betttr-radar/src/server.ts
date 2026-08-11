@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { config, validateConfig } from './config.js';
 import {
   getState,
-  initFromReport,
+  initLiveStore,
   subscribe,
   heartbeat,
   refreshFromReport,
@@ -13,6 +13,7 @@ import {
   recalcMetas,
   refreshLaunchVolumes,
   updateLaunch,
+  forceRefreshLaunch,
 } from './liveStore.js';
 import { startGeyserFeed } from './geyserFeed.js';
 import { startRpcPollFeed } from './rpcPollFeed.js';
@@ -101,8 +102,35 @@ function buildStreamInitPayload() {
 }
 
 validateConfig();
-initFromReport();
 setTweetStreamAccounts(config.tweetstreamAccounts);
+
+async function enrichStaleLaunches() {
+  const now = Math.floor(Date.now() / 1000);
+  const pending = getState().launches
+    .filter((l) => {
+      const hasLabel = (l.symbol?.trim() || l.name?.trim()) && l.symbol !== l.mint.slice(0, 8);
+      const missingVisual = !hasLabel || !l.image;
+      const missingMetrics =
+        l.marketCapUsd == null
+        || l.holderCount == null
+        || (l.volumeUsd1h == null && l.txns24h == null);
+      const ageOk = !l.blockTime || now - l.blockTime <= 3600;
+      return ageOk && (missingVisual || missingMetrics);
+    })
+    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
+    .slice(0, 24);
+
+  await Promise.all(
+    pending.map(async (l) => {
+      try {
+        const enriched = await enrichLaunchLive(l, (partial) => updateLaunch(partial));
+        updateLaunch(enriched);
+      } catch {
+        /* retry next interval */
+      }
+    }),
+  );
+}
 
 const server = http.createServer((req, res) => {
   const url = req.url?.split('?')[0] ?? '/';
@@ -129,6 +157,27 @@ const server = http.createServer((req, res) => {
   if (url === '/api/report') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(buildReportPayload()));
+    return;
+  }
+
+  const launchMatch = url.match(/^\/api\/launch\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);
+  if (launchMatch) {
+    const mint = launchMatch[1]!;
+    void (async () => {
+      try {
+        const launch = await forceRefreshLaunch(mint);
+        if (!launch) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'launch not found' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ launch }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: (err as Error).message }));
+      }
+    })();
     return;
   }
 
@@ -163,64 +212,43 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-async function enrichStaleLaunches() {
-  const now = Math.floor(Date.now() / 1000);
-  const pending = getState().launches
-    .filter((l) => {
-      const hasLabel = (l.symbol?.trim() || l.name?.trim()) && l.symbol !== l.mint.slice(0, 8);
-      return !hasLabel || !l.image;
-    })
-    .sort((a, b) => (b.blockTime ?? 0) - (a.blockTime ?? 0))
-    .filter((l) => !l.blockTime || now - l.blockTime <= 3600)
-    .slice(0, 20);
+void initLiveStore().then(() => {
+  server.listen(config.port, HOST, async () => {
+    console.log(`\n  Betttr.xyz Meta Radar (live)`);
+    console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
 
-  await Promise.all(
-    pending.map(async (l) => {
-      try {
-        const enriched = await enrichLaunchLive(l, (partial) => updateLaunch(partial));
-        updateLaunch(enriched);
-      } catch {
-        /* retry next interval */
-      }
-    }),
-  );
-}
+    setInterval(heartbeat, 25_000);
+    setInterval(recalcMetas, 10_000);
+    setInterval(() => void refreshLaunchVolumes(), 5_000);
+    setInterval(refreshFromReport, 60_000);
+    setInterval(() => void enrichStaleLaunches(), 4_000);
+    setInterval(() => flushPersist(), 30_000);
 
-server.listen(config.port, HOST, async () => {
-  console.log(`\n  Betttr.xyz Meta Radar (live)`);
-  console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
+    if (config.tweetstreamApiKey) {
+      await fetchTweetStreamMe();
+      await setupTweetStreamAccounts();
+      startTweetStreamFeed();
+    } else {
+      console.log('  TweetStream off — set TWEETSTREAM_API_KEY\n');
+    }
 
-  setInterval(heartbeat, 25_000);
-  setInterval(recalcMetas, 10_000);
-  setInterval(() => void refreshLaunchVolumes(), 5_000);
-  setInterval(refreshFromReport, 60_000);
-  setInterval(() => void enrichStaleLaunches(), 4_000);
-  setInterval(() => flushPersist(), 30_000);
+    void logOutboundIp();
 
-  if (config.tweetstreamApiKey) {
-    await fetchTweetStreamMe();
-    await setupTweetStreamAccounts();
-    startTweetStreamFeed();
-  } else {
-    console.log('  TweetStream off — set TWEETSTREAM_API_KEY\n');
-  }
+    const pollMode = config.rpcPollMode;
+    if (pollMode === 'only' || pollMode === 'backup') {
+      startRpcPollFeed().catch((err) => {
+        console.error('RPC poll feed failed:', err?.message ?? err);
+      });
+    }
 
-  void logOutboundIp();
-
-  const pollMode = config.rpcPollMode;
-  if (pollMode === 'only' || pollMode === 'backup') {
-    startRpcPollFeed().catch((err) => {
-      console.error('RPC poll feed failed:', err?.message ?? err);
-    });
-  }
-
-  if (config.geyserEnabled && pollMode !== 'only') {
-    startGeyserFeed().catch((err) => {
-      console.error('Geyser feed failed:', err?.message ?? err);
-    });
-  } else if (pollMode === 'only') {
-    console.log('  Geyser gRPC off — RPC poll only (GEYSER_RPC_POLL=only)\n');
-  } else if (!config.geyserEnabled) {
-    console.log('  Geyser off — set BETTTR_GEYSER=true or NARRA_GEYSER=true\n');
-  }
+    if (config.geyserEnabled && pollMode !== 'only') {
+      startGeyserFeed().catch((err) => {
+        console.error('Geyser feed failed:', err?.message ?? err);
+      });
+    } else if (pollMode === 'only') {
+      console.log('  Geyser gRPC off — RPC poll only (GEYSER_RPC_POLL=only)\n');
+    } else if (!config.geyserEnabled) {
+      console.log('  Geyser off — set BETTTR_GEYSER=true or NARRA_GEYSER=true\n');
+    }
+  });
 });

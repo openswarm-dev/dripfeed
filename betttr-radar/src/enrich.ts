@@ -77,7 +77,7 @@ async function fetchDexScreener(mint: string): Promise<Partial<LaunchRecord>> {
 }
 
 function needsEnrichment(m: Partial<LaunchRecord>): boolean {
-  return !m.image || !(m.name || m.symbol);
+  return !m.image || !(m.name || m.symbol) || m.marketCapUsd == null || m.holderCount == null;
 }
 
 function hasUsefulVisual(m: Partial<LaunchRecord>): boolean {
@@ -144,7 +144,7 @@ export async function enrichLaunchLive(
 
   const emit = () => {
     if (!onProgress) return;
-    if (!merged.image && !(merged.name || merged.symbol)) return;
+    if (!merged.image && !(merged.name || merged.symbol) && merged.marketCapUsd == null) return;
     onProgress(toRecord(launch, merged));
   };
 
@@ -176,7 +176,7 @@ export async function enrichLaunchLive(
     emit();
   }
 
-  // Volumes after visual data — don't block image.
+  // Always pull volumes — don't skip just because the visual landed.
   const vol = await fetchVolumeMetrics(launch.mint);
   if (vol) {
     merged = {
@@ -186,6 +186,14 @@ export async function enrichLaunchLive(
       txns24h: vol.txns24h ?? merged.txns24h,
       volumeUpdatedAt: vol.volumeUpdatedAt,
     };
+    emit();
+  }
+
+  // One more pump pass for holders/mcap if still empty.
+  if (merged.marketCapUsd == null || merged.holderCount == null) {
+    const pumpAgain = await fetchPumpFun(launch.mint);
+    merged = mergePreferExisting(merged, pumpAgain);
+    emit();
   }
 
   const record = toRecord(launch, merged);

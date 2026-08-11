@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import NarraDashboard from "@/components/narra/NarraDashboard";
 import { useNarra } from "@/lib/narra/useNarra";
@@ -12,6 +12,9 @@ const ease = [0.22, 1, 0.36, 1] as const;
 function CinematicIntro({ onComplete }: { onComplete: () => void }) {
   const [phase, setPhase] = useState<"wait" | "in" | "pulse" | "grow" | "out">("wait");
   const [logoReady, setLogoReady] = useState(false);
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  const startedRef = useRef(false);
 
   useEffect(() => {
     const img = new window.Image();
@@ -23,14 +26,15 @@ function CinematicIntro({ onComplete }: { onComplete: () => void }) {
   }, []);
 
   useEffect(() => {
-    if (!logoReady) return;
+    if (!logoReady || startedRef.current) return;
+    startedRef.current = true;
     setPhase("in");
     const t1 = setTimeout(() => setPhase("pulse"), 500);
     const t2 = setTimeout(() => setPhase("grow"), 1400);
     const t3 = setTimeout(() => setPhase("out"), 2000);
-    const t4 = setTimeout(onComplete, 2800);
+    const t4 = setTimeout(() => onCompleteRef.current(), 2800);
     return () => [t1, t2, t3, t4].forEach(clearTimeout);
-  }, [logoReady, onComplete]);
+  }, [logoReady]);
 
   const logoVariants: Record<string, { opacity: number | number[]; scale: number | number[]; filter: string }> = {
     wait:  { opacity: 0, scale: 0.7, filter: "blur(8px)" },
@@ -66,14 +70,16 @@ function CinematicIntro({ onComplete }: { onComplete: () => void }) {
 }
 
 export default function Page() {
-  const { state, loading, error, loaderDone } = useNarra();
+  const { state, loading, error, loaderDone, refreshLaunch } = useNarra();
   const [introDone, setIntroDone] = useState(false);
+  const finishIntro = useCallback(() => setIntroDone(true), []);
+  const onLoaderDone = useCallback(() => {}, []);
 
   return (
     <div style={{ background: T.bg, minHeight: "100vh", color: "#F4F4F8" }}>
       <AnimatePresence>
         {!introDone && (
-          <CinematicIntro key="intro" onComplete={() => setIntroDone(true)} />
+          <CinematicIntro key="intro" onComplete={finishIntro} />
         )}
       </AnimatePresence>
 
@@ -89,7 +95,8 @@ export default function Page() {
             loading={loading}
             error={error}
             loaderDone={loaderDone || !!error}
-            onLoaderDone={() => {}}
+            onLoaderDone={onLoaderDone}
+            onRefreshLaunch={refreshLaunch}
           />
         </motion.div>
       )}

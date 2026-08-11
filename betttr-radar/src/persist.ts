@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { LaunchRecord } from './fetchLaunches.js';
 import type { SocialSpark } from './socialSpark.js';
+import { ensureRadarSchema, getPool } from './db.js';
 
 export interface PersistedState {
   launches: LaunchRecord[];
@@ -19,8 +20,13 @@ const MAX_WAIT_MS = 10_000;
 let saveTimer: ReturnType<typeof setTimeout> | null = null;
 let dirtySince = 0;
 let pending: PersistedState | null = null;
+let dbEnabled = false;
 
-export function loadPersistedState(): PersistedState | null {
+export async function initPersist(): Promise<void> {
+  dbEnabled = await ensureRadarSchema();
+}
+
+function loadFromFile(): PersistedState | null {
   try {
     const raw = fs.readFileSync(STATE_FILE, 'utf8');
     const data = JSON.parse(raw) as PersistedState;
@@ -28,8 +34,135 @@ export function loadPersistedState(): PersistedState | null {
     console.log(`[persist] loaded ${data.launches.length} launches from ${STATE_FILE}`);
     return data;
   } catch {
-    console.log(`[persist] no existing state at ${STATE_FILE}`);
     return null;
+  }
+}
+
+export function loadPersistedState(): PersistedState | null {
+  // Sync path used at boot — file first; async PG hydrate runs via hydrateFromDb().
+  const file = loadFromFile();
+  if (file) return file;
+  console.log(`[persist] no existing state at ${STATE_FILE}`);
+  return null;
+}
+
+/** Load latest snapshot from Railway Postgres (preferred when available). */
+export async function hydrateFromDb(): Promise<PersistedState | null> {
+  await ensureRadarSchema();
+  const pool = getPool();
+  if (!pool) return null;
+  try {
+    const [launchesRes, sparksRes, kvRes] = await Promise.all([
+      pool.query<{ data: LaunchRecord }>(
+        `SELECT data FROM radar_launches ORDER BY block_time DESC NULLS LAST LIMIT 5000`,
+      ),
+      pool.query<{ data: SocialSpark }>(
+        `SELECT data FROM radar_sparks ORDER BY received_at DESC NULLS LAST LIMIT 200`,
+      ),
+      pool.query<{ value: { liveLaunches?: number; savedAt?: number } }>(
+        `SELECT value FROM radar_kv WHERE key = 'live_meta' LIMIT 1`,
+      ),
+    ]);
+    const launches = launchesRes.rows.map((r) => r.data).filter(Boolean);
+    if (!launches.length) {
+      console.log('[persist] postgres empty — keeping file/report seed');
+      return null;
+    }
+    const sparks = sparksRes.rows.map((r) => r.data).filter(Boolean);
+    const meta = kvRes.rows[0]?.value ?? {};
+    console.log(`[persist] hydrated ${launches.length} launches + ${sparks.length} sparks from Postgres`);
+    return {
+      launches,
+      sparks,
+      liveLaunches: meta.liveLaunches ?? launches.length,
+      savedAt: meta.savedAt ?? Date.now(),
+    };
+  } catch (err) {
+    console.warn('[persist] postgres load failed:', (err as Error).message);
+    return null;
+  }
+}
+
+function saveToFile(payload: PersistedState) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    const tmp = `${STATE_FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(payload));
+    fs.renameSync(tmp, STATE_FILE);
+  } catch (err) {
+    console.warn('[persist] file save failed:', (err as Error).message);
+  }
+}
+
+async function saveToDb(payload: PersistedState) {
+  if (!dbEnabled) return;
+  const pool = getPool();
+  if (!pool) return;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Upsert launches in chunks
+    const launches = payload.launches.slice(0, 5000);
+    for (let i = 0; i < launches.length; i += 100) {
+      const chunk = launches.slice(i, i + 100);
+      const values: unknown[] = [];
+      const placeholders: string[] = [];
+      chunk.forEach((l, idx) => {
+        const o = idx * 3;
+        placeholders.push(`($${o + 1}, $${o + 2}::jsonb, $${o + 3})`);
+        values.push(l.mint, JSON.stringify(l), l.blockTime ?? null);
+      });
+      await client.query(
+        `INSERT INTO radar_launches (mint, data, block_time)
+         VALUES ${placeholders.join(',')}
+         ON CONFLICT (mint) DO UPDATE SET
+           data = EXCLUDED.data,
+           block_time = EXCLUDED.block_time,
+           updated_at = NOW()`,
+        values,
+      );
+    }
+
+    const sparks = payload.sparks.slice(0, 200);
+    if (sparks.length) {
+      const values: unknown[] = [];
+      const placeholders: string[] = [];
+      sparks.forEach((s, idx) => {
+        const o = idx * 3;
+        placeholders.push(`($${o + 1}, $${o + 2}::jsonb, $${o + 3})`);
+        values.push(s.id, JSON.stringify(s), s.receivedAt ?? null);
+      });
+      await client.query(
+        `INSERT INTO radar_sparks (id, data, received_at)
+         VALUES ${placeholders.join(',')}
+         ON CONFLICT (id) DO UPDATE SET
+           data = EXCLUDED.data,
+           received_at = EXCLUDED.received_at,
+           updated_at = NOW()`,
+        values,
+      );
+    }
+
+    await client.query(
+      `INSERT INTO radar_kv (key, value, updated_at)
+       VALUES ('live_meta', $1::jsonb, NOW())
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()`,
+      [JSON.stringify({ liveLaunches: payload.liveLaunches, savedAt: payload.savedAt })],
+    );
+
+    // Prune stale rows beyond keep window
+    await client.query(
+      `DELETE FROM radar_launches
+       WHERE mint NOT IN (
+         SELECT mint FROM radar_launches ORDER BY block_time DESC NULLS LAST LIMIT 5000
+       )`,
+    );
+    await client.query('COMMIT');
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch { /* ignore */ }
+    console.warn('[persist] postgres save failed:', (err as Error).message);
+  } finally {
+    client.release();
   }
 }
 
@@ -39,14 +172,8 @@ function flush() {
   if (!pending) return;
   const payload = pending;
   pending = null;
-  try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    const tmp = `${STATE_FILE}.tmp`;
-    fs.writeFileSync(tmp, JSON.stringify(payload));
-    fs.renameSync(tmp, STATE_FILE);
-  } catch (err) {
-    console.warn('[persist] save failed:', (err as Error).message);
-  }
+  saveToFile(payload);
+  void saveToDb(payload);
 }
 
 /** Debounced persist with a max wait so continuous live updates still flush. */

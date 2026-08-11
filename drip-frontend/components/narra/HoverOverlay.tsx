@@ -38,7 +38,7 @@ export function HoverOverlay({
   useEffect(() => {
     if (!target) return;
     const pad = 12;
-    const pw = 340;
+    const pw = 520;
     const ph = 420;
     let x = target.rect.right + pad;
     let y = target.rect.top;
@@ -126,7 +126,7 @@ function LaunchOverlayContent({ l }: { l: LaunchRecord }) {
         </div>
         <PumpFunButton mint={l.mint} size={28} />
       </div>
-      <div className="hover-overlay-grid">
+      <div className="hover-overlay-grid hover-overlay-grid--row">
         <div><span className="lbl">Mcap</span><span className="val">{money(l.marketCapUsd)}</span></div>
         <div><span className="lbl">Vol 1h</span><span className="val">{money(l.volumeUsd1h)}</span></div>
         <div><span className="lbl">Tx 24h</span><span className="val">{l.txns24h ?? "—"}</span></div>

@@ -259,5 +259,16 @@ export function useNarra() {
     };
   }, [loading, error, mergePartial]);
 
-  return { state, loading, error, loaderDone };
+  const refreshLaunch = useCallback(async (mint: string) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/radar/launch/${mint}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { launch?: LaunchRecord };
+      if (data.launch) mergePartial({ launch: data.launch });
+    } catch {
+      /* ignore */
+    }
+  }, [mergePartial]);
+
+  return { state, loading, error, loaderDone, refreshLaunch };
 }
