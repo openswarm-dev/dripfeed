@@ -260,9 +260,6 @@ export function addLaunch(launch: LaunchRecord) {
   state.feeds.tweetstream = tweetstreamConnected;
   broadcast('launch', {
     launch,
-    metas: state.metas,
-    sparks: state.sparks,
-    launches: state.launches.slice(0, 200),
     geyserStats: state.geyserStats,
     liveLaunches: state.liveLaunches,
   });
@@ -291,7 +288,6 @@ export function updateLaunch(launch: LaunchRecord, opts?: { soft?: boolean }) {
     };
     broadcast('launch', {
       launch: launches[idx],
-      launches: state.launches.slice(0, 200),
       geyserStats: { ...geyserStats },
       liveLaunches: state.liveLaunches,
     });
