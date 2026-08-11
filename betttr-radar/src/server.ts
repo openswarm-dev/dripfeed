@@ -283,7 +283,7 @@ void initLiveStore().then(async () => {
     setInterval(heartbeat, 25_000);
     setInterval(recalcMetas, 8_000);
     // Identity-only gap-fill (one list call) — not per-mint metrics.
-    setInterval(() => void syncRecentPumpCreates(), 400);
+    setInterval(() => void syncRecentPumpCreates(), 350);
     setInterval(refreshFromReport, 120_000);
     setInterval(() => void enrichStaleLaunches(), 12_000);
     setInterval(() => flushPersist(), 45_000);

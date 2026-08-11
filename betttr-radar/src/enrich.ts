@@ -4,7 +4,37 @@ import type { LaunchRecord } from './fetchLaunches.js';
 import { ipfsGatewayUrls, normalizeMediaUrl } from './imageKey.js';
 
 const cache = new Map<string, Partial<LaunchRecord>>();
-const RETRY_MS = [200, 450, 900, 1600];
+const RETRY_MS = [200, 450, 900];
+
+/** Cap concurrent IPFS enrich so geyser/sync aren't starved. */
+const MAX_ENRICH_INFLIGHT = 3;
+const MAX_ENRICH_QUEUED = 40;
+let enrichInflight = 0;
+const enrichQueue: Array<() => void> = [];
+
+async function withEnrichSlot<T>(fn: () => Promise<T>): Promise<T | null> {
+  if (enrichInflight >= MAX_ENRICH_INFLIGHT && enrichQueue.length >= MAX_ENRICH_QUEUED) {
+    return null;
+  }
+  await new Promise<void>((resolve) => {
+    if (enrichInflight < MAX_ENRICH_INFLIGHT) {
+      enrichInflight += 1;
+      resolve();
+    } else {
+      enrichQueue.push(() => {
+        enrichInflight += 1;
+        resolve();
+      });
+    }
+  });
+  try {
+    return await fn();
+  } finally {
+    enrichInflight -= 1;
+    const next = enrichQueue.shift();
+    if (next) next();
+  }
+}
 
 export type EnrichProgress = (partial: LaunchRecord) => void;
 
@@ -88,42 +118,60 @@ function mergePreferExisting(
 /**
  * Live enrich: metadata URI only (name/image).
  * Tries multiple IPFS gateways — no pump.fun API.
+ * Concurrency-limited so create ingest never stalls.
  */
 export async function enrichLaunchLive(
   launch: ParsedLaunch,
   onProgress?: EnrichProgress,
 ): Promise<LaunchRecord> {
-  let merged: Partial<LaunchRecord> = {
+  const run = async (): Promise<LaunchRecord> => {
+    let merged: Partial<LaunchRecord> = {
+      name: launch.name,
+      symbol: launch.symbol,
+      image: launch.image,
+    };
+
+    const emit = () => {
+      if (!onProgress) return;
+      if (!merged.image && !(merged.name || merged.symbol)) return;
+      onProgress(toRecord(launch, merged));
+    };
+
+    // Already have identity from geyser/pump list — skip IPFS unless image missing.
+    if (merged.name && merged.symbol && merged.image) {
+      const record = toRecord(launch, merged);
+      cache.set(launch.mint, record);
+      return record;
+    }
+
+    if (launch.metadataUri) {
+      merged = mergePreferExisting(merged, await fetchJsonMetadata(launch.metadataUri));
+      emit();
+    }
+
+    for (let i = 0; i < RETRY_MS.length; i++) {
+      if (!needsEnrichment(merged)) break;
+      if (!launch.metadataUri) break;
+      await sleep(RETRY_MS[i]!);
+      merged = mergePreferExisting(merged, await fetchJsonMetadata(launch.metadataUri));
+      emit();
+    }
+
+    if (merged.image) merged.image = normalizeMediaUrl(merged.image) ?? merged.image;
+
+    const record = toRecord(launch, merged);
+    cache.set(launch.mint, record);
+    return record;
+  };
+
+  const got = await withEnrichSlot(run);
+  if (got) return got;
+  // Queue full — return what we already have so create path stays hot.
+  return toRecord(launch, {
     name: launch.name,
     symbol: launch.symbol,
     image: launch.image,
-  };
-
-  const emit = () => {
-    if (!onProgress) return;
-    if (!merged.image && !(merged.name || merged.symbol)) return;
-    onProgress(toRecord(launch, merged));
-  };
-
-  if (launch.metadataUri) {
-    merged = mergePreferExisting(merged, await fetchJsonMetadata(launch.metadataUri));
-    emit();
-  }
-
-  for (let i = 0; i < RETRY_MS.length; i++) {
-    if (!needsEnrichment(merged)) break;
-    if (!launch.metadataUri) break;
-    await sleep(RETRY_MS[i]!);
-    merged = mergePreferExisting(merged, await fetchJsonMetadata(launch.metadataUri));
-    emit();
-  }
-
-  // Prefer a stable https image URL for the UI (first gateway rewrite).
-  if (merged.image) merged.image = normalizeMediaUrl(merged.image) ?? merged.image;
-
-  const record = toRecord(launch, merged);
-  cache.set(launch.mint, record);
-  return record;
+  });
 }
 
 export async function enrichLaunch(launch: ParsedLaunch): Promise<LaunchRecord> {

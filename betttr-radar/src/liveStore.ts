@@ -47,6 +47,17 @@ let geyserStats: GeyserStats = {
   perMinute: 0,
 };
 const recentCreateTimes: number[] = [];
+/** O(1) mint membership — linear scans of 5k launches stall ingest. */
+const knownMints = new Set<string>();
+
+function rebuildMintIndex(launches: LaunchRecord[]) {
+  knownMints.clear();
+  for (const l of launches) knownMints.add(l.mint);
+}
+
+export function hasMint(mint: string): boolean {
+  return knownMints.has(mint);
+}
 
 function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
   const byMint = new Map<string, LaunchRecord>();
@@ -55,7 +66,17 @@ function mergeLaunches(existing: LaunchRecord[], incoming: LaunchRecord[]): Laun
     const prev = byMint.get(l.mint);
     byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
-  return sortLaunchesByTime([...byMint.values()]).slice(0, 5000);
+  return [...byMint.values()]
+    .sort((a, b) => {
+      const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
+      if (bt !== 0) return bt;
+      return (b.slot ?? 0) - (a.slot ?? 0);
+    })
+    .slice(0, 5000);
+}
+
+function afterLaunchListChange(launches: LaunchRecord[]) {
+  rebuildMintIndex(launches);
 }
 
 /** Newest create first — blockTime, then slot as tiebreaker. */
@@ -204,6 +225,7 @@ export function initFromReport(): LiveState {
     ? mergeLaunches(persisted.launches, reportLaunches)
     : reportLaunches;
   const sparks = persisted?.sparks ?? [];
+  rebuildMintIndex(launches);
   state = buildState(launches, sparks, persisted?.liveLaunches ?? 0);
   return state;
 }
@@ -227,6 +249,7 @@ export async function initLiveStore(): Promise<LiveState> {
     sparks,
     Math.max(current.liveLaunches, fromDb.liveLaunches),
   );
+  rebuildMintIndex(state.launches);
   return state;
 }
 
@@ -279,10 +302,15 @@ export function recordCreateStored() {
 
 export function addLaunch(launch: LaunchRecord) {
   const current = getState();
-  if (current.launches.some((l) => l.mint === launch.mint)) return;
+  if (knownMints.has(launch.mint)) return;
 
   recordCreateStored();
+  knownMints.add(launch.mint);
   const launches = insertLaunchSorted(current.launches, launch);
+  // Keep index in sync when oldest rows are dropped by the 5k cap.
+  if (launches.length < current.launches.length + 1) {
+    rebuildMintIndex(launches);
+  }
 
   // Soft path: push to UI immediately — never run analyzeMetas on the hot create path.
   if (state) {
@@ -433,60 +461,76 @@ export async function refreshLaunchVolumes() {
 
 /**
  * Gap-fill newest pump.fun creates via one list API call (identity only).
- * Catches tokens ERPC missed without per-mint metrics polling.
+ * This is the safety net that keeps us aligned with pump.fun / Axiom when
+ * Geyser misses create+buy bundles — must never stay locked.
  */
 let createSyncRunning = false;
+let createSyncStartedAt = 0;
+
+async function syncRecentPumpCreatesInner() {
+  const recent = await fetchRecentPumpCreates(60);
+  if (!recent.length) {
+    console.log('[sync] pump list empty/unreachable');
+    return;
+  }
+
+  const fresh = recent
+    .filter((coin) => !knownMints.has(coin.mint))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+    .slice(0, 25);
+
+  let added = 0;
+  for (const coin of fresh) {
+    if (knownMints.has(coin.mint)) continue;
+
+    const cls = classifyNarratives({
+      name: coin.name,
+      symbol: coin.symbol,
+      mint: coin.mint,
+    });
+
+    addLaunch({
+      signature: `pump-sync:${coin.mint}`,
+      slot: 0,
+      blockTime: coin.createdAt || Math.floor(Date.now() / 1000),
+      mint: coin.mint,
+      creator: coin.creator ?? '',
+      isCreateV2: true,
+      name: coin.name,
+      symbol: coin.symbol,
+      image: normalizeMediaUrl(coin.image),
+      metadataUri: coin.metadataUri,
+      narratives: cls.narratives,
+      primaryNarrative: cls.primaryNarrative,
+      narrativeScore: cls.narrativeScore,
+    });
+    added += 1;
+  }
+
+  if (added) {
+    console.log(`[sync] gap-filled ${added} creates from pump.fun list`);
+  }
+}
+
 export async function syncRecentPumpCreates() {
-  if (createSyncRunning || !state) return;
+  if (!state) return;
+  if (createSyncRunning) {
+    if (Date.now() - createSyncStartedAt < 15_000) return;
+    console.warn('[sync] clearing stuck lock (>15s)');
+    createSyncRunning = false;
+  }
+
   createSyncRunning = true;
+  createSyncStartedAt = Date.now();
   try {
-    const recent = await fetchRecentPumpCreates(50);
-    if (!recent.length) return;
-
-    const current = getState();
-    const known = new Set(current.launches.map((l) => l.mint));
-
-    // Newest first so the feed top updates immediately; insertLaunchSorted
-    // still places each row by create time.
-    const fresh = recent
-      .filter((coin) => !known.has(coin.mint))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      .slice(0, 20); // never dump 40+ in one lock — next tick picks up the rest
-
-    let added = 0;
-    for (const coin of fresh) {
-      if (known.has(coin.mint)) continue;
-      known.add(coin.mint);
-
-      const cls = classifyNarratives({
-        name: coin.name,
-        symbol: coin.symbol,
-        mint: coin.mint,
-      });
-
-      addLaunch({
-        signature: `pump-sync:${coin.mint}`,
-        slot: 0,
-        blockTime: coin.createdAt || Math.floor(Date.now() / 1000),
-        mint: coin.mint,
-        creator: coin.creator ?? '',
-        isCreateV2: true,
-        name: coin.name,
-        symbol: coin.symbol,
-        image: normalizeMediaUrl(coin.image),
-        metadataUri: coin.metadataUri,
-        narratives: cls.narratives,
-        primaryNarrative: cls.primaryNarrative,
-        narrativeScore: cls.narrativeScore,
-      });
-      added += 1;
-      // Yield only — client rAF unbatches paints. Long delays froze sync.
-      await new Promise((r) => setImmediate(r));
-    }
-
-    if (added) {
-      console.log(`[sync] gap-filled ${added} creates from pump.fun list`);
-    }
+    await Promise.race([
+      syncRecentPumpCreatesInner(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('sync timeout 12s')), 12_000);
+      }),
+    ]);
+  } catch (err) {
+    console.warn('[sync] failed:', (err as Error).message);
   } finally {
     createSyncRunning = false;
   }

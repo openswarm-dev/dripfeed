@@ -10,7 +10,7 @@ import {
   updateLaunch,
   recordGeyserPumpTx,
   recordCreateParsed,
-  getState,
+  hasMint,
 } from './liveStore.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -263,7 +263,7 @@ export async function startGeyserFeed() {
         lastCreateAt = Date.now();
         pumpTxSinceCreate = 0;
 
-        const already = seen.has(parsed.mint);
+        const already = seen.has(parsed.mint) || hasMint(parsed.mint);
         if (!already) {
           seen.add(parsed.mint);
           if (seen.size > 20_000) {
@@ -287,30 +287,26 @@ export async function startGeyserFeed() {
             slot: Number.isFinite(slot) ? slot : parsed.slot,
             blockTime,
           });
-          // Skip if store already has it (gap-fill may have landed first).
-          if (getState().launches.some((l) => l.mint === parsed.mint)) {
-            void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
-              updateLaunch(partial, { soft: true });
-            }).then((enriched) => {
-              updateLaunch(enriched, { soft: true });
-            }).catch(() => {});
-            return;
-          }
           addLaunch(launch);
 
           console.log(
             `[live] ${launch.isCreateV2 ? 'V2' : 'V1'} ${launch.symbol ?? launch.name ?? launch.mint.slice(0, 8)}…`,
           );
 
-          void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
-            updateLaunch(partial, { soft: true });
-          }).then((enriched) => {
-            updateLaunch(enriched, { soft: true });
-          }).catch(() => {});
+          // Only enrich when identity/image is missing — unbounded IPFS was
+          // starving gap-fill and making us lag Axiom/pump.fun.
+          const needsEnrich = !(launch.name && launch.symbol && launch.image);
+          if (needsEnrich) {
+            void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
+              updateLaunch(partial, { soft: true });
+            }).then((enriched) => {
+              updateLaunch(enriched, { soft: true });
+            }).catch(() => {});
+          }
           return;
         }
 
-        // Already stored (possibly as a blank false-positive earlier): patch name/image if we have them.
+        // Already stored: light patch only if we decoded fresh name/uri.
         if (parsed.name || parsed.symbol || parsed.metadataUri) {
           const blockTime = Math.floor(Date.now() / 1000);
           void enrichLaunchLive({ ...parsed, blockTime }, (partial) => {
@@ -354,10 +350,7 @@ export async function startGeyserFeed() {
     }
 
     // Brief pause before resubscribe so we don't spin.
-    const stats = getState().geyserStats;
-    console.log(
-      `[geyser] resubscribing ERPC (seen ${stats.pumpTxSeen} pump txs, ${stats.createsStored} creates)…`,
-    );
+    console.log('[geyser] resubscribing ERPC…');
     await sleep(1500);
   }
 }
