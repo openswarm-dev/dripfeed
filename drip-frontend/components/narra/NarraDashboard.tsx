@@ -126,6 +126,8 @@ function MetaCard({
   return (
     <button
       type="button"
+      data-meta-id={m.id}
+      data-meta-stage={m.stage}
       className={`meta-item meta-item--compact ${extraClass ?? ""} ${hit ? "stage-hit" : ""} ${focusHit ? "opp-focus-hit" : ""} ${dimmed ? "stage-dimmed" : ""} ${surging ? "meta-item--surging" : ""}`}
       style={{ boxShadow: `0 0 0 1px rgba(200, 240, 255, ${glow})` }}
       onMouseEnter={(e) => onHover(m, e.currentTarget)}
@@ -304,6 +306,36 @@ export default function NarraDashboard({
   } | null>(null);
   const [focusOppId, setFocusOppId] = useState<string | null>(null);
   const hoverHideRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const formingScrollRef = useRef<HTMLDivElement>(null);
+  const activeScrollRef = useRef<HTMLDivElement>(null);
+
+  /** Scroll a feed container so the first item matching [data-meta-id] is visible. */
+  const scrollFeedToMeta = (metaId: string) => {
+    for (const ref of [formingScrollRef, activeScrollRef]) {
+      const container = ref.current;
+      if (!container) continue;
+      const el = container.querySelector<HTMLElement>(`[data-meta-id="${metaId}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        el.classList.add("opp-focus-scroll");
+        setTimeout(() => el.classList.remove("opp-focus-scroll"), 1200);
+        return;
+      }
+    }
+  };
+
+  /** Scroll Building/Hot feeds so the first meta matching a stage is visible. */
+  const scrollFeedToStage = (stage: MetaStage) => {
+    for (const ref of [formingScrollRef, activeScrollRef]) {
+      const container = ref.current;
+      if (!container) continue;
+      const el = container.querySelector<HTMLElement>(`[data-meta-stage="${stage}"]`);
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        return;
+      }
+    }
+  };
 
   const showMetaHover = (m: MetaTrack, el: HTMLElement) => {
     if (hoverHideRef.current) clearTimeout(hoverHideRef.current);
@@ -450,13 +482,25 @@ export default function NarraDashboard({
       }
     }
 
+    const nowSec = Math.floor(Date.now() / 1000);
     // Newest activity first — score only gates inclusion, does not reshuffle every tick.
     const quality = events
       .filter((e) => {
-        if (e.isLaunch) return e.tier >= 1 || e.opportunityScore >= 3;
-        return e.tier >= 1 || e.opportunityScore >= 4;
+        const ageSec = nowSec - e.at;
+        if (e.isLaunch) {
+          // Always show very fresh creates (< 4 min) — they just hit the chain
+          if (ageSec < 240) return true;
+          // Otherwise require real traction
+          return e.tier >= 1;
+        }
+        // Metas: require meaningful stage or real activity, reject stale zero-vol metas
+        if (e.tier < 1) return false;
+        return true;
       })
       .sort((a, b) => {
+        // Primary: tier (quality signal)
+        if (b.tier !== a.tier) return b.tier - a.tier;
+        // Secondary: recency (within same tier, newest first)
         if (b.at !== a.at) return b.at - a.at;
         return b.opportunityScore - a.opportunityScore;
       })
@@ -503,7 +547,24 @@ export default function NarraDashboard({
   }, [focusedOpportunity, metas]);
 
   const toggleOpportunityFocus = (ev: TimelineEvent) => {
-    setFocusOppId((prev) => (prev === ev.feedId ? null : ev.feedId));
+    const isNew = focusOppId !== ev.feedId;
+    setFocusOppId(isNew ? ev.feedId : null);
+    if (isNew) {
+      // Scroll Building/Hot feed to the relevant meta after React re-renders
+      requestAnimationFrame(() => {
+        if (ev.metaId) {
+          scrollFeedToMeta(ev.metaId);
+        } else if (ev.isLaunch && metas) {
+          // Find a meta that contains this launch's mint
+          const mint = ev.feedId.startsWith("launch:") ? ev.feedId.slice("launch:".length) : null;
+          if (mint) {
+            const match = [...(metas.emerging ?? []), ...metas.forming, ...metas.active]
+              .find((m) => m.tokens.some((t) => t.mint === mint));
+            if (match) scrollFeedToMeta(match.id);
+          }
+        }
+      });
+    }
   };
 
   const opportunityFeedItems = useMemo(
@@ -647,10 +708,14 @@ export default function NarraDashboard({
             {metas && (
               <div className="stage-pipeline">
                 {metas.stages.map((s) => {
-                  const tokenCount = metas.stageTokenCounts?.[s.id as MetaStage]
-                    ?? [...(metas.emerging ?? []), ...metas.forming, ...metas.active, ...(metas.fading ?? [])]
-                      .filter((m) => m.stage === s.id)
-                      .reduce((sum, m) => sum + m.launchCount, 0);
+                  // Spark stage = social sparks count (TweetStream), not token clusters
+                  const isSpark = s.id === "spark";
+                  const tokenCount = isSpark
+                    ? (live?.liveSparks ?? 0)
+                    : (metas.stageTokenCounts?.[s.id as MetaStage]
+                      ?? [...(metas.emerging ?? []), ...metas.forming, ...metas.active, ...(metas.fading ?? [])]
+                        .filter((m) => m.stage === s.id)
+                        .reduce((sum, m) => sum + m.launchCount, 0));
                   let cls = "stage-step stage-step--holo";
                   if (hero && s.id === hero.stage) cls += " current";
                   if (stageFilter === s.id) cls += " filter-on";
@@ -660,10 +725,16 @@ export default function NarraDashboard({
                       key={s.id}
                       type="button"
                       className={cls}
-                      title={`${s.label}: ${tokenCount} tokens — ${s.description}`}
+                      title={isSpark
+                        ? `${s.label}: ${tokenCount} social sparks — ${s.description}`
+                        : `${s.label}: ${tokenCount} tokens — ${s.description}`}
                       onClick={() => {
                         setStageFilter((prev) => (prev === s.id ? null : s.id));
                         setFocusOppId(null);
+                        // Scroll Building feed to matching metas
+                        if (s.id !== stageFilter) {
+                          requestAnimationFrame(() => scrollFeedToStage(s.id as MetaStage));
+                        }
                       }}
                     >
                       <span className="opp-badge stage-step-badge">{s.label.toUpperCase()}</span>
@@ -705,7 +776,7 @@ export default function NarraDashboard({
             <BetttrCard accent="forming">
               <PanelTitle count={metas?.formingCount ?? 0} variant="warn">Building</PanelTitle>
               <p className="panel-hint">Clusters forming — hottest rise to the top</p>
-              <div className="card-scroll">
+              <div className="card-scroll" ref={formingScrollRef}>
                 {!formingClusters.length ? (
                   <p className="empty">Watching for 5+ token clusters…</p>
                 ) : (
@@ -736,7 +807,7 @@ export default function NarraDashboard({
             <BetttrCard accent="active">
               <PanelTitle count={metas?.activeMetaCount ?? 0} variant="live">Hot right now</PanelTitle>
               <p className="panel-hint">Confirmed metas — hover for detail</p>
-              <div className="card-scroll">
+              <div className="card-scroll" ref={activeScrollRef}>
                 {!activeMetas.length ? (
                   <p className="empty">No active metas in the last 6 hours</p>
                 ) : (
@@ -765,7 +836,7 @@ export default function NarraDashboard({
 
             <BetttrCard accent="launch">
               <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
-              <p className="panel-hint">Live creates from Geyser</p>
+              <p className="panel-hint">Live creates · Geyser + pump.fun</p>
               <div className="card-scroll">
                 {!visibleLaunches.length ? (
                   <p className="empty">Waiting for CreateV2 stream…</p>

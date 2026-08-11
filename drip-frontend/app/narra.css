@@ -1720,6 +1720,16 @@
   z-index: 2;
 }
 
+.meta-item.opp-focus-scroll {
+  animation: scroll-highlight 1.2s ease-out forwards;
+}
+
+@keyframes scroll-highlight {
+  0%   { box-shadow: 0 0 0 2px rgba(20, 241, 149, 0.7), 0 0 24px rgba(20, 241, 149, 0.35); }
+  60%  { box-shadow: 0 0 0 2px rgba(20, 241, 149, 0.4), 0 0 12px rgba(20, 241, 149, 0.2); }
+  100% { box-shadow: none; }
+}
+
 .opp-feed-card__row {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) auto;

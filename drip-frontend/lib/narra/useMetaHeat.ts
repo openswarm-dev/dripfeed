@@ -113,18 +113,61 @@ export function useMetaHeat(metas: MetaTrack[] | undefined) {
   return { levels, intensities, surging, prevSnapshots };
 }
 
+/** Score each meta for sort priority — higher = hotter / more relevant right now. */
+function metaHotScore(m: MetaTrack, nowSec: number): number {
+  let s = 0;
+  const ageSec = nowSec - (m.lastSeen ?? 0);
+  const vol1h = m.totalVolumeUsd1h ?? 0;
+  const vol24h = m.totalVolumeUsd24h ?? 0;
+  const tx = m.totalTxns24h ?? 0;
+
+  // Freshness — heavily weighted. A cluster that just had a new token wins.
+  if (ageSec <= 120) s += 50;
+  else if (ageSec <= 300) s += 40;
+  else if (ageSec <= 600) s += 30;
+  else if (ageSec <= 1800) s += 20;
+  else if (ageSec <= 3600) s += 10;
+  // Stale with no volume gets penalised hard.
+  else if (ageSec > 7200 && vol1h <= 0) s -= 30;
+  else if (ageSec > 3600 && vol1h <= 0) s -= 10;
+
+  // Volume momentum — real money moving
+  if (vol1h >= 10000) s += 30;
+  else if (vol1h >= 1000) s += 20;
+  else if (vol1h >= 100) s += 12;
+  else if (vol1h >= 10) s += 6;
+  else if (vol1h > 0) s += 3;
+
+  // 24h vol as a fallback signal
+  if (vol1h <= 0 && vol24h >= 500) s += 5;
+
+  // Tx activity
+  if (tx >= 100) s += 10;
+  else if (tx >= 20) s += 6;
+  else if (tx >= 5) s += 3;
+
+  // Trend — hot means volume is growing
+  if (m.volumeTrend === "hot") s += 15;
+  else if (m.volumeTrend === "cooling") s += 5;
+
+  // Stage — early/active stages preferred for opportunities
+  if (m.stage === "momentum" || m.stage === "copycat") s += 12;
+  else if (m.stage === "recognition") s += 8;
+  else if (m.stage === "naming") s += 5;
+  else if (m.stage === "peak") s += 4;
+
+  // Size as a tiebreak
+  if (m.launchCount >= 20) s += 8;
+  else if (m.launchCount >= 10) s += 5;
+  else if (m.launchCount >= 5) s += 3;
+
+  return s;
+}
+
 export function sortMetasByHeat(
   metas: MetaTrack[],
   _levels?: Map<string, number>,
 ): MetaTrack[] {
-  // Rank by recency of cluster activity, then size — so Building/Hot visibly move
-  // when new tokens join, without thrashing on volume noise.
-  return [...metas].sort((a, b) => {
-    if ((b.lastSeen ?? 0) !== (a.lastSeen ?? 0)) return (b.lastSeen ?? 0) - (a.lastSeen ?? 0);
-    if (b.launchCount !== a.launchCount) return b.launchCount - a.launchCount;
-    const va = a.totalVolumeUsd1h ?? 0;
-    const vb = b.totalVolumeUsd1h ?? 0;
-    if (vb !== va) return vb - va;
-    return (b.velocityPerHour ?? 0) - (a.velocityPerHour ?? 0);
-  });
+  const nowSec = Math.floor(Date.now() / 1000);
+  return [...metas].sort((a, b) => metaHotScore(b, nowSec) - metaHotScore(a, nowSec));
 }

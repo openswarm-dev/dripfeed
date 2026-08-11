@@ -1,0 +1,33 @@
+---
+description: UI text size standards — never use tiny text
+alwaysApply: true
+---
+
+# Text Size Standards
+
+Never use tiny text. All UI text must meet these minimums:
+
+| Role | Min size | Notes |
+|------|----------|-------|
+| Field labels / caps | 12px | mono, uppercase OK |
+| Body / descriptions | 14px | |
+| Input values | 15px | |
+| Buttons | 14px font-weight 600+ |
+| Metric numbers | 20px+ | mono |
+| Section headers | 14px font-weight 700 |
+
+❌ BAD — never do this:
+```tsx
+<p style={{ fontSize: 10 }}>Label</p>
+<input style={{ fontSize: 12 }} />
+```
+
+✅ GOOD:
+```tsx
+<p style={{ fontSize: 12, fontFamily:"var(--font-geist-mono)", textTransform:"uppercase", letterSpacing:"0.12em" }}>Label</p>
+<input style={{ fontSize: 15, height: 48 }} />
+```
+
+- 10px is only acceptable for `<kbd>` shortcut hints or tertiary decorative mono labels
+- All interactive elements (buttons, inputs) must be ≥ 14px
+- Never shrink text to fit — make the container bigger instead
