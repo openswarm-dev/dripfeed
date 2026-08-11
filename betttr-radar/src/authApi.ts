@@ -71,10 +71,26 @@ function rpcUrl(): string {
 }
 
 /** Fast balance via raw JSON-RPC — avoids flaky/slow @solana/web3.js Connection. */
+const balanceCache = new Map<string, { lamports: number; at: number }>();
+const walletCache = new Map<string, { wallet: Awaited<ReturnType<typeof getWalletForUser>>; at: number }>();
+const BALANCE_TTL_MS = 30_000;
+const WALLET_TTL_MS = 5 * 60_000;
+
+async function cachedWallet(userId: string) {
+  const hit = walletCache.get(userId);
+  if (hit && Date.now() - hit.at < WALLET_TTL_MS) return hit.wallet;
+  const wallet = await getWalletForUser(userId);
+  walletCache.set(userId, { wallet, at: Date.now() });
+  return wallet;
+}
+
 async function fetchSolBalanceLamports(address: string): Promise<number | null> {
   if (!address || address.startsWith('DEV')) return null;
+  const cached = balanceCache.get(address);
+  if (cached && Date.now() - cached.at < BALANCE_TTL_MS) return cached.lamports;
+
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2500);
+  const timer = setTimeout(() => controller.abort(), 1800);
   try {
     const res = await fetch(heliusOrRpcUrl(), {
       method: 'POST',
@@ -87,12 +103,14 @@ async function fetchSolBalanceLamports(address: string): Promise<number | null> 
       }),
       signal: controller.signal,
     });
-    if (!res.ok) return null;
+    if (!res.ok) return cached?.lamports ?? null;
     const data = (await res.json()) as { result?: { value?: number } };
     const value = data.result?.value;
-    return typeof value === 'number' ? value : null;
+    if (typeof value !== 'number') return cached?.lamports ?? null;
+    balanceCache.set(address, { lamports: value, at: Date.now() });
+    return value;
   } catch {
-    return null;
+    return cached?.lamports ?? null;
   } finally {
     clearTimeout(timer);
   }
@@ -171,7 +189,7 @@ export async function handleAuthApi(
     const auth = requireUser(req, res);
     if (!auth) return true;
     const user = await getUserById(auth.userId);
-    const wallet = await getWalletForUser(auth.userId);
+    const wallet = await cachedWallet(auth.userId);
     if (!user) {
       json(res, 404, { error: 'User not found' });
       return true;
@@ -201,7 +219,7 @@ export async function handleWalletApi(
   if ((url === '/api/wallet/balance' || url === '/api/wallet/deposit') && req.method === 'GET') {
     const auth = requireUser(req, res);
     if (!auth) return true;
-    const wallet = await getWalletForUser(auth.userId);
+    const wallet = await cachedWallet(auth.userId);
     if (!wallet) {
       json(res, 404, { error: 'No wallet for this account' });
       return true;

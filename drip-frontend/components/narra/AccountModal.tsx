@@ -373,15 +373,11 @@ function AccountPanel({
   const [copied, setCopied] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
 
-  // Soft refresh in background if we already have a cached balance from /auth/me
+  // Soft refresh only when we don't already have a balance from /auth/me
   useEffect(() => {
-    if (!auth.token) return;
-    if (auth.balanceReady) {
-      void auth.refreshBalance();
-      return;
-    }
+    if (!auth.token || auth.balanceReady) return;
     void auth.refreshBalance();
-  }, [auth.token]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [auth.token, auth.balanceReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const copyAddress = async () => {
     if (!address) return;
@@ -439,6 +435,10 @@ function AccountPanel({
 
       {!exportOpen ? (
         <>
+          {/* Pre-mount hidden iframe container so export can warm faster */}
+          <div className="auth-export__iframe auth-export__iframe--hidden" aria-hidden>
+            <div id={IFRAME_CONTAINER_ID} />
+          </div>
           <button
             type="button"
             className="auth-modal__cta"
