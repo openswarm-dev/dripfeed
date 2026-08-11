@@ -33,6 +33,55 @@ function reportToState(report: NarraReport): NarraState {
   };
 }
 
+type PartialPayload = Partial<NarraReport & {
+  metas?: MetaDashboard;
+  launches?: LaunchRecord[];
+  sparks?: SocialSpark[];
+  geyserStats?: GeyserStats;
+  geyserEnabled?: boolean;
+  live?: NarraLive;
+  launch?: LaunchRecord;
+  spark?: SocialSpark;
+  connected?: boolean;
+  feeds?: NarraLive["feeds"];
+  liveLaunches?: number;
+  liveSparks?: number;
+}>;
+
+function mergePayload(base: NarraState, data: PartialPayload): NarraState {
+  let launches = base.launches;
+  if (data.launches) {
+    launches = data.launches;
+  } else if (data.launch) {
+    launches = [data.launch, ...base.launches].slice(0, 500);
+  }
+
+  let sparks = base.sparks;
+  if (data.sparks) {
+    sparks = data.sparks;
+  } else if (data.spark) {
+    sparks = [data.spark, ...base.sparks].slice(0, 100);
+  }
+
+  const live: NarraLive = {
+    ...base.live,
+    ...(data.live ?? {}),
+    feeds: data.feeds ?? data.live?.feeds ?? base.live.feeds,
+    connected: data.connected ?? data.live?.connected ?? base.live.connected,
+    liveLaunches: data.liveLaunches ?? data.live?.liveLaunches ?? base.live.liveLaunches,
+    liveSparks: data.liveSparks ?? data.live?.liveSparks ?? base.live.liveSparks,
+  };
+
+  return {
+    metas: data.metas ?? base.metas,
+    launches,
+    sparks,
+    geyserStats: data.geyserStats ?? base.geyserStats,
+    geyserEnabled: data.geyserEnabled ?? base.geyserEnabled,
+    live,
+  };
+}
+
 export function useNarra() {
   const [state, setState] = useState<NarraState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,20 +89,7 @@ export function useNarra() {
   const [loaderDone, setLoaderDone] = useState(false);
   const esRef = useRef<EventSource | null>(null);
 
-  const mergePartial = useCallback((data: Partial<NarraReport & {
-    metas?: MetaDashboard;
-    launches?: LaunchRecord[];
-    sparks?: SocialSpark[];
-    geyserStats?: GeyserStats;
-    geyserEnabled?: boolean;
-    live?: NarraLive;
-    launch?: LaunchRecord;
-    spark?: SocialSpark;
-    connected?: boolean;
-    feeds?: NarraLive["feeds"];
-    liveLaunches?: number;
-    liveSparks?: number;
-  }>) => {
+  const mergePartial = useCallback((data: PartialPayload) => {
     setState((prev) => {
       const base = prev ?? {
         metas: null,
@@ -63,34 +99,7 @@ export function useNarra() {
         geyserEnabled: undefined,
         live: EMPTY_LIVE,
       };
-
-      let launches = data.launches ?? base.launches;
-      if (data.launch) {
-        launches = [data.launch, ...base.launches].slice(0, 500);
-      }
-
-      let sparks = data.sparks ?? base.sparks;
-      if (data.spark) {
-        sparks = [data.spark, ...base.sparks].slice(0, 100);
-      }
-
-      const live: NarraLive = {
-        ...base.live,
-        ...(data.live ?? {}),
-        feeds: data.feeds ?? data.live?.feeds ?? base.live.feeds,
-        connected: data.connected ?? data.live?.connected ?? base.live.connected,
-        liveLaunches: data.liveLaunches ?? data.live?.liveLaunches ?? base.live.liveLaunches,
-        liveSparks: data.liveSparks ?? data.live?.liveSparks ?? base.live.liveSparks,
-      };
-
-      return {
-        metas: data.metas ?? base.metas,
-        launches,
-        sparks,
-        geyserStats: data.geyserStats ?? base.geyserStats,
-        geyserEnabled: data.geyserEnabled ?? base.geyserEnabled,
-        live,
-      };
+      return mergePayload(base, data);
     });
   }, []);
 
@@ -99,18 +108,17 @@ export function useNarra() {
 
     async function load() {
       try {
-        const res = await fetch(`${API_BASE}/api/radar/report`);
+        const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
         const report: NarraReport = await res.json();
         if (cancelled) return;
         if (!res.ok || report.error) {
           setError(report.error ?? "Radar service unavailable");
         } else {
           setState(reportToState(report));
-          setLoaderDone(true);
         }
       } catch {
         if (!cancelled) {
-          setError("Cannot reach Betttr.xyz radar. Start betttr-radar locally or deploy it on Railway.");
+          setError("Cannot reach radar backend. Run npm run dev in DEVSNIPER/narra (port 3950) or set RADAR_API_URL.");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -122,7 +130,7 @@ export function useNarra() {
   }, []);
 
   useEffect(() => {
-    if (loading) return;
+    if (loading || error) return;
 
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
@@ -155,11 +163,10 @@ export function useNarra() {
       mergePartial(JSON.parse((e as MessageEvent).data));
     });
 
-    es.onerror = () => { /* auto-reconnect */ };
+    es.onerror = () => { /* EventSource auto-reconnects */ };
 
     const fallback = setTimeout(() => setLoaderDone(true), 6000);
 
-    // Poll report as backup when SSE is flaky (common behind proxies)
     const poll = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
@@ -177,7 +184,7 @@ export function useNarra() {
       es.close();
       esRef.current = null;
     };
-  }, [loading, mergePartial]);
+  }, [loading, error, mergePartial]);
 
   return { state, loading, error, loaderDone };
 }

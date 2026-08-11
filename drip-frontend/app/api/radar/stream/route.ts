@@ -21,9 +21,13 @@ export async function GET() {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
       },
     });
   } catch {
-    return NextResponse.json({ error: "Radar stream unavailable" }, { status: 503 });
+    return NextResponse.json(
+      { error: "Radar stream unavailable — ensure narra backend is running on RADAR_API_URL" },
+      { status: 503 },
+    );
   }
 }

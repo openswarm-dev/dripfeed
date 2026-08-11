@@ -53,10 +53,11 @@ export function ensureDataDir() {
 
 export function validateConfig() {
   if (!config.rpcUrl && !config.heliusApiKey) {
-    if (config.geyserEnabled) {
-      throw new Error('Set SOLANA_RPC_URL or HELIUS_API_KEY for live Geyser feed');
+    if (config.geyserEnabled || config.tweetstreamApiKey) {
+      console.warn('  No RPC URL — historical scan disabled; live feeds only');
+      return;
     }
-    console.warn('  No RPC URL — historical scan disabled; serving cached report only');
+    console.warn('  No RPC URL — serving cached report only');
   }
 }
 

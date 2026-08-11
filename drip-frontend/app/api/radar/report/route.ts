@@ -16,7 +16,7 @@ export async function GET() {
     return NextResponse.json(
       {
         error:
-          "Radar service unavailable. On Railway, redeploy drip-frontend (bundles betttr-radar) or set RADAR_API_URL to a running radar service.",
+          "Radar service unavailable. Run npm run dev in DEVSNIPER/narra or set RADAR_API_URL to your Railway radar service.",
       },
       { status: 503 },
     );

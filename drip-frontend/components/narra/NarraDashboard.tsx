@@ -196,9 +196,9 @@ export default function NarraDashboard({
   loaderDone: boolean;
   onLoaderDone: () => void;
 }) {
-  const [showLoader, setShowLoader] = useState(false);
+  const [showLoader, setShowLoader] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [appVisible, setAppVisible] = useState(true);
+  const [appVisible, setAppVisible] = useState(false);
 
   const metas = state?.metas ?? null;
   const launches = state?.launches ?? [];
@@ -208,11 +208,18 @@ export default function NarraDashboard({
   const feeds = live?.feeds;
 
   useEffect(() => {
-    if (!loading && (loaderDone || error || launches.length > 0)) {
+    if (loading) return;
+    if (error) {
       setShowLoader(false);
       setAppVisible(true);
+      return;
     }
-  }, [loaderDone, loading, error, launches.length, onLoaderDone]);
+    if (loaderDone) {
+      setShowLoader(false);
+      setAppVisible(true);
+      onLoaderDone();
+    }
+  }, [loaderDone, loading, error, onLoaderDone]);
 
   useEffect(() => {
     const tick = setInterval(() => {
@@ -338,7 +345,7 @@ export default function NarraDashboard({
             {error}
             <br />
             <span>
-              Local: run <code>npm run dev</code> in <code>betttr-radar/</code> · Railway: set <code>RADAR_API_URL</code> on the frontend service
+              Local: run <code>npm run dev</code> in <code>DEVSNIPER/narra</code> or <code>dripfeed/betttr-radar</code> · Railway: set <code>RADAR_API_URL</code>
             </span>
           </div>
         )}

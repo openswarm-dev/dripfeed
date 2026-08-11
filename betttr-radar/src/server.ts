@@ -22,6 +22,7 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(__dirname, '..', 'public');
+const HOST = process.env.HOST || '0.0.0.0';
 
 const MIME: Record<string, string> = {
   '.html': 'text/html',
@@ -29,10 +30,6 @@ const MIME: Record<string, string> = {
   '.js': 'application/javascript',
   '.svg': 'image/svg+xml',
 };
-
-validateConfig();
-initFromReport();
-setTweetStreamAccounts(config.tweetstreamAccounts);
 
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS ?? '')
   .split(',')
@@ -55,6 +52,40 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {
   }
 }
 
+function buildReportPayload() {
+  const state = getState();
+  return {
+    generatedAt: state.metas.generatedAt,
+    days: state.metas.lookbackDays,
+    totalLaunches: state.metas.totalLaunches,
+    metas: state.metas,
+    launches: state.launches.slice(0, 500),
+    sparks: state.sparks,
+    geyserStats: state.geyserStats,
+    geyserEnabled: config.geyserEnabled,
+    live: {
+      connected: state.connected,
+      feeds: state.feeds,
+      liveLaunches: state.liveLaunches,
+      liveSparks: state.liveSparks,
+      lastLaunchAt: state.lastLaunchAt,
+      lastSparkAt: state.lastSparkAt,
+    },
+  };
+}
+
+function buildStreamInitPayload() {
+  const state = getState();
+  return {
+    ...state,
+    geyserEnabled: config.geyserEnabled,
+  };
+}
+
+validateConfig();
+initFromReport();
+setTweetStreamAccounts(config.tweetstreamAccounts);
+
 const server = http.createServer((req, res) => {
   const url = req.url?.split('?')[0] ?? '/';
 
@@ -73,41 +104,24 @@ const server = http.createServer((req, res) => {
 
   if (url === '/api/state') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(getState()));
+    res.end(JSON.stringify({ ...getState(), geyserEnabled: config.geyserEnabled }));
     return;
   }
 
   if (url === '/api/report') {
-    const state = getState();
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({
-      generatedAt: state.metas.generatedAt,
-      days: state.metas.lookbackDays,
-      totalLaunches: state.metas.totalLaunches,
-      metas: state.metas,
-      launches: state.launches.slice(0, 500),
-      sparks: state.sparks,
-      geyserStats: state.geyserStats,
-      geyserEnabled: config.geyserEnabled,
-      live: {
-        connected: state.connected,
-        feeds: state.feeds,
-        liveLaunches: state.liveLaunches,
-        liveSparks: state.liveSparks,
-        lastLaunchAt: state.lastLaunchAt,
-        lastSparkAt: state.lastSparkAt,
-      },
-    }));
+    res.end(JSON.stringify(buildReportPayload()));
     return;
   }
 
   if (url === '/api/stream') {
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
+      'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
     });
-    res.write(`event: init\ndata: ${JSON.stringify(getState())}\n\n`);
+    res.write(`event: init\ndata: ${JSON.stringify(buildStreamInitPayload())}\n\n`);
 
     const send = (data: string) => res.write(data);
     const unsub = subscribe(send);
@@ -131,9 +145,9 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-server.listen(config.port, async () => {
+server.listen(config.port, HOST, async () => {
   console.log(`\n  Betttr.xyz Meta Radar (live)`);
-  console.log(`  http://localhost:${config.port}\n`);
+  console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}\n`);
 
   setInterval(heartbeat, 25_000);
   setInterval(recalcMetas, 10_000);
@@ -145,7 +159,7 @@ server.listen(config.port, async () => {
     await setupTweetStreamAccounts();
     startTweetStreamFeed();
   } else {
-    console.log('  TweetStream off — set TWEETSTREAM_API_KEY in narra/.env\n');
+    console.log('  TweetStream off — set TWEETSTREAM_API_KEY\n');
   }
 
   if (config.geyserEnabled) {
@@ -153,6 +167,6 @@ server.listen(config.port, async () => {
       console.error('Geyser feed failed:', err?.message ?? err);
     });
   } else {
-    console.log('  Geyser off — set NARRA_GEYSER=true for live pump creates\n');
+    console.log('  Geyser off — set BETTTR_GEYSER=true or NARRA_GEYSER=true\n');
   }
 });

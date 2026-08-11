@@ -70,19 +70,34 @@ function runLoaderSequence() {
   setTimeout(() => setLoaderStep('meta', 'loading'), 3000);
 }
 
+function reportToState(report) {
+  return {
+    metas: report.metas ?? null,
+    launches: report.launches ?? [],
+    sparks: report.sparks ?? [],
+    geyserStats: report.geyserStats ?? {},
+    geyserEnabled: report.geyserEnabled,
+    live: report.live ?? {
+      connected: false,
+      feeds: { geyser: false, tweetstream: false, tweetstreamAccounts: [] },
+    },
+  };
+}
+
 async function loadInitial() {
   runLoaderSequence();
   animateProgressBar();
 
   const res = await fetch('/api/report');
-  state = await res.json();
-  if (state.error) {
+  const report = await res.json();
+  if (report.error) {
     document.getElementById('heroMeta').innerHTML =
-      `<p class="empty">${state.error}<br/>Run <code>npm run scan</code> in narra/</p>`;
+      `<p class="empty">${report.error}<br/>Run <code>npm run scan</code> in narra/</p>`;
     setLoaderStep('meta', 'done');
     setTimeout(dismissLoader, 1200);
     return;
   }
+  state = reportToState(report);
   connectStream();
   bindMetaSelection();
   startAgeTick();
@@ -152,6 +167,7 @@ function connectStream() {
       launches: data.launches ?? [],
       sparks: data.sparks ?? [],
       geyserStats: data.geyserStats ?? {},
+      geyserEnabled: data.geyserEnabled,
       live: {
         connected: data.connected,
         feeds: data.feeds,
@@ -161,7 +177,7 @@ function connectStream() {
         lastSparkAt: data.lastSparkAt,
       },
     };
-    setLoaderStep('geyser', feeds.geyser ? 'done' : 'loading');
+    setLoaderStep('geyser', feeds.geyser ? 'done' : (data.geyserEnabled === false ? 'done' : 'loading'));
     setLoaderStep('x', feeds.tweetstream ? 'done' : 'loading');
     setLoaderStep('meta', 'done');
     setTimeout(dismissLoader, 700);
@@ -299,7 +315,11 @@ function render(flashNew) {
     feeds.geyser ? 'live' : 'off',
     feeds.geyser
       ? `Geyser · ${state.geyserStats?.perMinute ?? live.liveLaunches ?? 0}/min · ${state.launches?.length ?? 0} stored`
-      : 'Geyser off',
+      : state.geyserEnabled === false
+        ? 'Geyser disabled'
+        : live.connected
+          ? 'Geyser reconnecting…'
+          : 'Geyser connecting…',
   );
   setFeedStatus(
     'xStatus',
