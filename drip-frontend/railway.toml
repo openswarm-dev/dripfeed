@@ -1,7 +1,7 @@
 [build]
-buildCommand = "cd ../betttr-radar && npm install && cd ../drip-frontend && npm install && npm run build"
+buildCommand = "npm install && npm run build"
 
 [deploy]
-startCommand = "node scripts/start-with-radar.mjs"
+startCommand = "npm run start:next"
 healthcheckPath = "/"
 restartPolicyType = "on_failure"
