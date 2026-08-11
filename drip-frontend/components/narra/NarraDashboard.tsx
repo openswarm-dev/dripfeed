@@ -15,6 +15,7 @@ import { AnimatedFeed } from "@/components/narra/AnimatedFeed";
 import { OpportunityFeedCard } from "@/components/narra/OpportunityFeedCard";
 import { PumpFunButton } from "@/components/ui/PumpFunButton";
 import { AccountModal, useBetttrAuth } from "@/components/narra/AccountModal";
+import { DeployTokenModal } from "@/components/narra/DeployTokenModal";
 
 const LOGO_SRC = "/logos/Betttr.png";
 const STAGE_LABELS: Record<string, string> = {
@@ -94,6 +95,7 @@ function MetaCard({
   focusDimmed = false,
   onHover,
   onHoverEnd,
+  onDeploy,
 }: {
   m: MetaTrack;
   extraClass?: string;
@@ -106,6 +108,7 @@ function MetaCard({
   focusDimmed?: boolean;
   onHover: (m: MetaTrack, el: HTMLElement) => void;
   onHoverEnd: () => void;
+  onDeploy?: (m: MetaTrack) => void;
 }) {
   const stageHit = stageFilter
     ? metaMatchesStage(m, stageFilter, sparks ?? [])
@@ -141,7 +144,28 @@ function MetaCard({
             {m.totalTxns24h > 0 ? <> · <strong className={txDir === "up" ? "metric-up" : ""}>{m.totalTxns24h}</strong> tx</> : null}
           </span>
         </div>
-        <span className="opp-badge stage-pill">{m.stageLabel}</span>
+        <div className="meta-card-actions">
+          <span className="opp-badge stage-pill">{m.stageLabel}</span>
+          <span
+            role="button"
+            tabIndex={0}
+            className="meta-deploy-btn"
+            onClick={(e) => {
+              e.stopPropagation();
+              e.preventDefault();
+              onDeploy?.(m);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation();
+                e.preventDefault();
+                onDeploy?.(m);
+              }
+            }}
+          >
+            DEPLOY
+          </span>
+        </div>
       </div>
       <div className="meta-row-sub">
         <span>Newest add <strong><LiveAge ts={m.lastSeen} /></strong> ago</span>
@@ -265,6 +289,7 @@ export default function NarraDashboard({
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
   const [appVisible, setAppVisible] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [deployMeta, setDeployMeta] = useState<MetaTrack | null>(null);
   const auth = useBetttrAuth();
   const [hoverTarget, setHoverTarget] = useState<{
     kind: "meta";
@@ -538,6 +563,9 @@ export default function NarraDashboard({
             <span className="radar-brand__title rainbow-text">Meta Radar</span>
           </div>
           <div className="radar-status">
+            <a href="/deployed" className="radar-pill radar-pill--link">
+              Deployed
+            </a>
             <div className={`radar-pill ${feeds?.geyser ? "radar-pill--live" : live?.connected ? "radar-pill--pending" : ""}`}>
               <span className="radar-pill__dot" />
               <span>
@@ -729,6 +757,7 @@ export default function NarraDashboard({
                         focusDimmed={!!focusMetaIds && !focusMetaIds.has(m.id)}
                         onHover={showMetaHover}
                         onHoverEnd={hideHover}
+                        onDeploy={setDeployMeta}
                       />
                     )}
                   />
@@ -758,6 +787,7 @@ export default function NarraDashboard({
                         focusDimmed={!!focusMetaIds && !focusMetaIds.has(m.id)}
                         onHover={showMetaHover}
                         onHoverEnd={hideHover}
+                        onDeploy={setDeployMeta}
                       />
                     )}
                   />
@@ -786,6 +816,12 @@ export default function NarraDashboard({
         </HoverOverlay>
       </div>
       <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} auth={auth} />
+      <DeployTokenModal
+        open={!!deployMeta}
+        onClose={() => setDeployMeta(null)}
+        meta={deployMeta}
+        auth={auth}
+      />
     </div>
   );
 }

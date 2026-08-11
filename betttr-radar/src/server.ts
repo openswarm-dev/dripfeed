@@ -25,6 +25,7 @@ import {
 import { enrichLaunchLive } from './enrich.js';
 import { flushPersist } from './persist.js';
 import { ensureAuthSchema } from './authStore.js';
+import { ensureDeploySchema } from './deployStore.js';
 import { handleAuthApi, handleWalletApi } from './authApi.js';
 import { turnkeyConfigured } from './turnkey.js';
 
@@ -165,7 +166,7 @@ const server = http.createServer((req, res) => {
     void (async () => {
       try {
         if (await handleAuthApi(req, res, fullUrl)) return;
-        if (await handleWalletApi(req, res, fullUrl.split('?')[0] ?? url)) return;
+        if (await handleWalletApi(req, res, fullUrl)) return;
         res.writeHead(404, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Not found' }));
       } catch (err) {
@@ -242,6 +243,7 @@ const server = http.createServer((req, res) => {
 
 void initLiveStore().then(async () => {
   await ensureAuthSchema();
+  await ensureDeploySchema();
   server.listen(config.port, HOST, async () => {
     console.log(`\n  Betttr.xyz Meta Radar (live)`);
     console.log(`  http://${HOST === '0.0.0.0' ? 'localhost' : HOST}:${config.port}`);

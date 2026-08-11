@@ -31,6 +31,14 @@ import {
   LAMPORTS_PER_SOL,
 } from '@solana/web3.js';
 import { subOrgTurnkeyClient } from './turnkey.js';
+import {
+  quoteBuyTokens,
+  uploadPumpMetadata,
+  deployPumpToken,
+  buyPumpToken,
+  sellPumpToken,
+} from './pumpTrade.js';
+import { recordDeploy, listDeploysForUser } from './deployStore.js';
 
 function json(res: ServerResponse, status: number, body: unknown) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -215,8 +223,9 @@ export async function handleWalletApi(
   res: ServerResponse,
   url: string,
 ): Promise<boolean> {
+  const path = url.split('?')[0] ?? url;
   // GET /api/wallet/balance  (Helius raw RPC — ~50–100ms)
-  if ((url === '/api/wallet/balance' || url === '/api/wallet/deposit') && req.method === 'GET') {
+  if ((path === '/api/wallet/balance' || path === '/api/wallet/deposit') && req.method === 'GET') {
     const auth = requireUser(req, res);
     if (!auth) return true;
     const wallet = await cachedWallet(auth.userId);
@@ -235,7 +244,7 @@ export async function handleWalletApi(
   }
 
   // GET /api/wallet/export-password
-  if (url === '/api/wallet/export-password' && req.method === 'GET') {
+  if (path === '/api/wallet/export-password' && req.method === 'GET') {
     const auth = requireUser(req, res);
     if (!auth) return true;
     const hash = await getExportPasswordHash(auth.userId);
@@ -244,7 +253,7 @@ export async function handleWalletApi(
   }
 
   // POST /api/wallet/export-password  { password }
-  if (url === '/api/wallet/export-password' && req.method === 'POST') {
+  if (path === '/api/wallet/export-password' && req.method === 'POST') {
     const auth = requireUser(req, res);
     if (!auth) return true;
     try {
@@ -264,7 +273,7 @@ export async function handleWalletApi(
   }
 
   // POST /api/wallet/export  { password, targetPublicKey }
-  if (url === '/api/wallet/export' && req.method === 'POST') {
+  if (path === '/api/wallet/export' && req.method === 'POST') {
     const auth = requireUser(req, res);
     if (!auth) return true;
     try {
@@ -303,7 +312,7 @@ export async function handleWalletApi(
   }
 
   // POST /api/wallet/withdraw  { to, amountSol }
-  if (url === '/api/wallet/withdraw' && req.method === 'POST') {
+  if (path === '/api/wallet/withdraw' && req.method === 'POST') {
     const auth = requireUser(req, res);
     if (!auth) return true;
     try {
@@ -369,6 +378,168 @@ export async function handleWalletApi(
       await conn.confirmTransaction({ signature: sig, blockhash, lastValidBlockHeight }, 'confirmed');
 
       json(res, 200, { signature: sig, amountSol, to });
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+    }
+    return true;
+  }
+
+  // GET /api/wallet/deploy/quote?sol=
+  if (path.startsWith('/api/wallet/deploy/quote') && req.method === 'GET') {
+    try {
+      const sol = Number(new URL(url, 'http://local').searchParams.get('sol') ?? '0');
+      if (!(sol > 0)) {
+        json(res, 400, { error: 'sol must be > 0' });
+        return true;
+      }
+      const quote = await quoteBuyTokens(sol);
+      json(res, 200, quote);
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+    }
+    return true;
+  }
+
+  // POST /api/wallet/deploy  { name, symbol, description, twitter, telegram, website, imageUrl, imageBase64, buySol, mayhem, cashback, metaId, metaTheme }
+  if (path === '/api/wallet/deploy' && req.method === 'POST') {
+    const auth = requireUser(req, res);
+    if (!auth) return true;
+    try {
+      const body = await readJson(req);
+      const wallet = await cachedWallet(auth.userId);
+      if (!wallet) {
+        json(res, 404, { error: 'No wallet' });
+        return true;
+      }
+      const name = String(body.name ?? '').trim();
+      const symbol = String(body.symbol ?? '').trim();
+      const buySol = Number(body.buySol);
+      if (!name || !symbol) {
+        json(res, 400, { error: 'name and symbol required' });
+        return true;
+      }
+      if (!(buySol > 0)) {
+        json(res, 400, { error: 'buySol must be > 0' });
+        return true;
+      }
+
+      const { metadataUri } = await uploadPumpMetadata({
+        name,
+        symbol,
+        description: body.description,
+        twitter: body.twitter,
+        telegram: body.telegram,
+        website: body.website,
+        imageUrl: body.imageUrl,
+        imageBase64: body.imageBase64,
+      });
+
+      const deployed = await deployPumpToken({
+        wallet,
+        name,
+        symbol,
+        metadataUri,
+        buySol,
+        mayhem: Boolean(body.mayhem),
+        cashback: Boolean(body.cashback),
+        metaId: body.metaId,
+        metaTheme: body.metaTheme,
+      });
+
+      const row = await recordDeploy({
+        userId: auth.userId,
+        mint: deployed.mint,
+        name,
+        symbol,
+        image: body.imageUrl ?? null,
+        metadataUri,
+        signature: deployed.signature,
+        buySol,
+        mayhem: Boolean(body.mayhem),
+        metaId: body.metaId ?? null,
+        metaTheme: body.metaTheme ?? null,
+      });
+
+      json(res, 201, { ...deployed, deploy: row });
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+    }
+    return true;
+  }
+
+  // GET /api/wallet/deploys
+  if (path === '/api/wallet/deploys' && req.method === 'GET') {
+    const auth = requireUser(req, res);
+    if (!auth) return true;
+    try {
+      const deploys = await listDeploysForUser(auth.userId);
+      // Enrich with live pump/helius-ish market fields from live store when possible
+      const { getState } = await import('./liveStore.js');
+      const launches = getState().launches ?? [];
+      const byMint = new Map(launches.map((l) => [l.mint, l]));
+      const enriched = deploys.map((d) => {
+        const live = byMint.get(d.mint);
+        return {
+          ...d,
+          marketCapUsd: live?.marketCapUsd ?? null,
+          volumeUsd1h: live?.volumeUsd1h ?? null,
+          volumeUsd24h: live?.volumeUsd24h ?? null,
+          txns24h: live?.txns24h ?? null,
+          holderCount: live?.holderCount ?? null,
+          bondingProgressPct: live?.bondingProgressPct ?? null,
+          bonded: live?.bonded ?? null,
+          image: d.image || live?.image || null,
+        };
+      });
+      json(res, 200, { deploys: enriched });
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+    }
+    return true;
+  }
+
+  // POST /api/wallet/buy  { mint, buySol }
+  if (path === '/api/wallet/buy' && req.method === 'POST') {
+    const auth = requireUser(req, res);
+    if (!auth) return true;
+    try {
+      const body = await readJson(req);
+      const wallet = await cachedWallet(auth.userId);
+      if (!wallet) {
+        json(res, 404, { error: 'No wallet' });
+        return true;
+      }
+      const result = await buyPumpToken({
+        wallet,
+        mint: String(body.mint ?? ''),
+        buySol: Number(body.buySol),
+        slippagePercent: body.slippagePercent,
+      });
+      json(res, 200, result);
+    } catch (err) {
+      json(res, 400, { error: (err as Error).message });
+    }
+    return true;
+  }
+
+  // POST /api/wallet/sell  { mint, percent }
+  if (path === '/api/wallet/sell' && req.method === 'POST') {
+    const auth = requireUser(req, res);
+    if (!auth) return true;
+    try {
+      const body = await readJson(req);
+      const wallet = await cachedWallet(auth.userId);
+      if (!wallet) {
+        json(res, 404, { error: 'No wallet' });
+        return true;
+      }
+      const result = await sellPumpToken({
+        wallet,
+        mint: String(body.mint ?? ''),
+        percent: Number(body.percent),
+        slippagePercent: body.slippagePercent,
+      });
+      json(res, 200, result);
     } catch (err) {
       json(res, 400, { error: (err as Error).message });
     }
