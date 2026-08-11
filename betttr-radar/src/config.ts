@@ -34,7 +34,7 @@ function resolveGeyserEndpoint(): string {
   }
   const explicit = process.env.GEYSER_ENDPOINT?.trim();
   if (explicit) return explicit;
-  return 'http://grpc-fra1-burst.erpc.global';
+  return 'http://grpc-fra1-1.erpc.global';
 }
 
 /** ERPC gRPC auth — only use X_TOKEN / ERPC token, never a Helius key. */

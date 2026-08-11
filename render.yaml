@@ -22,7 +22,7 @@ services:
       - key: HELIUS_API_KEY
         sync: false
       - key: GEYSER_ENDPOINT
-        value: http://grpc-fra1-burst.erpc.global
+        value: http://grpc-fra1-1.erpc.global
       - key: TWEETSTREAM_API_KEY
         sync: false
       - key: TWEETSTREAM_WS_URL

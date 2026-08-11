@@ -58,7 +58,7 @@ NARRA_GEYSER=true
 GEYSER_RPC_POLL=false
 
 SOLANA_RPC_URL=https://edge.erpc.global?api-key=YOUR_ERPC_KEY
-GEYSER_ENDPOINT=http://grpc-fra1-burst.erpc.global
+GEYSER_ENDPOINT=http://grpc-fra1-1.erpc.global
 
 HELIUS_API_KEY=your_helius_key
 
@@ -91,7 +91,7 @@ sudo journalctl -u betttr-radar -f
 You should see:
 
 ```
-Geyser live: http://grpc-fra1-burst.erpc.global
+Geyser live: http://grpc-fra1-1.erpc.global
 Geyser connected — streaming all pump.fun creates
 [live] V2 ...
 ```
