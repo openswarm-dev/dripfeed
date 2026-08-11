@@ -31,7 +31,8 @@ async function logOutboundIp() {
     const res = await fetch('https://api.ipify.org?format=json', { signal: AbortSignal.timeout(8000) });
     const data = await res.json() as { ip?: string };
     if (data.ip) {
-      console.log(`  Railway egress IP: ${data.ip} — whitelist in ERPC dashboard for Geyser gRPC`);
+      console.log(`  Railway egress IP: ${data.ip}`);
+      console.log(`  Whitelist ${data.ip} (or 152.55.177.0/24) in ERPC for Geyser gRPC`);
     }
   } catch {
     /* non-fatal */
@@ -178,19 +179,20 @@ server.listen(config.port, HOST, async () => {
 
   void logOutboundIp();
 
-  if (config.rpcPollFallback) {
+  const pollMode = config.rpcPollMode;
+  if (pollMode === 'only' || pollMode === 'backup') {
     startRpcPollFeed().catch((err) => {
       console.error('RPC poll feed failed:', err?.message ?? err);
     });
   }
 
-  if (config.geyserEnabled && !config.rpcPollFallback) {
+  if (config.geyserEnabled && pollMode !== 'only') {
     startGeyserFeed().catch((err) => {
       console.error('Geyser feed failed:', err?.message ?? err);
     });
-  } else if (config.geyserEnabled && config.rpcPollFallback) {
-    console.log('  Geyser gRPC skipped on Railway — using RPC poll (set GEYSER_RPC_POLL=false + whitelist IP for gRPC)\n');
-  } else if (!config.rpcPollFallback) {
+  } else if (pollMode === 'only') {
+    console.log('  Geyser gRPC off — RPC poll only (GEYSER_RPC_POLL=only)\n');
+  } else if (!config.geyserEnabled) {
     console.log('  Geyser off — set BETTTR_GEYSER=true or NARRA_GEYSER=true\n');
   }
 });
