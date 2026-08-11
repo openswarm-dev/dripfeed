@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { TokenImage } from "@/components/ui/TokenImage";
 import { useBetttrAuth } from "@/components/narra/AccountModal";
+import { RadarNav, markBootDone } from "@/components/narra/RadarNav";
+import { useNarra } from "@/lib/narra/useNarra";
 import { formatCompact } from "@/lib/narra/format";
 
 type DeployRow = {
@@ -44,11 +46,16 @@ async function api<T>(
 
 export default function DeployedPage() {
   const auth = useBetttrAuth();
+  const { state } = useNarra();
   const [deploys, setDeploys] = useState<DeployRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busyMint, setBusyMint] = useState<string | null>(null);
   const [buyAmt, setBuyAmt] = useState<Record<string, string>>({});
   const [status, setStatus] = useState<string | null>(null);
+
+  useEffect(() => {
+    markBootDone();
+  }, []);
 
   const load = useCallback(async () => {
     if (!auth.token) {
@@ -110,23 +117,29 @@ export default function DeployedPage() {
   };
 
   return (
-    <div className="deployed-page">
+    <div className="deployed-page radar-root">
+      <RadarNav active="deployed" state={state} />
+      <div className="ambient" aria-hidden="true">
+        <div className="ambient-orb orb-a animate-drift" />
+        <div className="ambient-orb orb-b animate-drift-delay" />
+        <div className="ambient-orb orb-c animate-drift-slow" />
+        <div className="grid-dots-dark ambient-grid" />
+        <div className="noise-overlay-dark ambient-noise" />
+      </div>
+
       <div className="deployed-shell">
-        <div className="deployed-nav">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logos/Betttr.png" alt="" width={36} height={36} />
-          <strong className="rainbow-text">Deployed tokens</strong>
-          <a href="/">← Meta Radar</a>
-          <span style={{ marginLeft: "auto", color: "#8e8e9a", fontSize: 13 }}>
-            {auth.user ? `@${auth.user.username}` : "Sign in on Meta Radar"}
-          </span>
-        </div>
+        <h1 className="auth-modal__title rainbow-text" style={{ marginBottom: 8 }}>
+          Deployed tokens
+        </h1>
+        <p className="auth-modal__hint" style={{ marginBottom: 18 }}>
+          Tokens you launched from your Turnkey wallet — buy and sell instantly.
+        </p>
 
         {error && <p className="auth-modal__error">{error}</p>}
         {status && <p className="auth-modal__status">{status}</p>}
 
         {!auth.token ? (
-          <p className="empty">Sign in from Meta Radar to see your deployments.</p>
+          <p className="empty">Sign in from the navbar to see your deployments.</p>
         ) : !deploys.length ? (
           <p className="empty">No deployed tokens yet — hit DEPLOY on a Building / Hot meta.</p>
         ) : (

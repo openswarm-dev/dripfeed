@@ -14,8 +14,9 @@ import { displayTheme } from "@/lib/narra/displayTheme";
 import { AnimatedFeed } from "@/components/narra/AnimatedFeed";
 import { OpportunityFeedCard } from "@/components/narra/OpportunityFeedCard";
 import { PumpFunButton } from "@/components/ui/PumpFunButton";
-import { AccountModal, useBetttrAuth } from "@/components/narra/AccountModal";
+import { useBetttrAuth } from "@/components/narra/AccountModal";
 import { DeployTokenModal } from "@/components/narra/DeployTokenModal";
+import { RadarNav, isBootDone, markBootDone } from "@/components/narra/RadarNav";
 
 const LOGO_SRC = "/logos/Betttr.png";
 const STAGE_LABELS: Record<string, string> = {
@@ -277,6 +278,7 @@ export default function NarraDashboard({
   loading,
   loaderDone: _loaderDone,
   onLoaderDone,
+  skipBoot = false,
 }: {
   state: import("@/lib/narra/types").NarraState | null;
   error: string | null;
@@ -284,11 +286,11 @@ export default function NarraDashboard({
   loaderDone: boolean;
   onLoaderDone: () => void;
   onRefreshLaunch?: (mint: string) => void;
+  skipBoot?: boolean;
 }) {
-  const [showLoader, setShowLoader] = useState(true);
+  const [showLoader, setShowLoader] = useState(() => !(skipBoot || isBootDone()));
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
-  const [appVisible, setAppVisible] = useState(false);
-  const [accountOpen, setAccountOpen] = useState(false);
+  const [appVisible, setAppVisible] = useState(() => skipBoot || isBootDone());
   const [deployMeta, setDeployMeta] = useState<MetaTrack | null>(null);
   const auth = useBetttrAuth();
   const [hoverTarget, setHoverTarget] = useState<{
@@ -340,6 +342,7 @@ export default function NarraDashboard({
   const dismissLoader = useCallback(() => {
     setShowLoader(false);
     setAppVisible(true);
+    markBootDone();
     onLoaderDone();
   }, [onLoaderDone]);
 
@@ -555,51 +558,7 @@ export default function NarraDashboard({
 
   return (
     <div className="radar-root">
-      <nav className="radar-nav">
-        <div className="radar-nav__inner">
-          <div className="radar-brand">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={LOGO_SRC} alt="Betttr.xyz" className="radar-brand__logo" />
-            <span className="radar-brand__title rainbow-text">Meta Radar</span>
-          </div>
-          <div className="radar-status">
-            <a href="/deployed" className="radar-pill radar-pill--link">
-              Deployed
-            </a>
-            <div className={`radar-pill ${feeds?.geyser ? "radar-pill--live" : live?.connected ? "radar-pill--pending" : ""}`}>
-              <span className="radar-pill__dot" />
-              <span>
-                {feeds?.geyser
-                  ? `Geyser · ${geyserStats?.perMinute ?? 0}/min`
-                  : live?.connected
-                    ? "Geyser reconnecting…"
-                    : state?.geyserEnabled === false
-                      ? "Geyser disabled"
-                      : "Geyser connecting…"}
-              </span>
-            </div>
-            <div className="radar-pill radar-pill--stats">
-              {metas
-                ? `${launches.length} creates · ${metas.activeMetaCount} active · ${metas.formingCount} forming · ${capitalize(metas.dominantStage)}`
-                : "—"}
-            </div>
-            {auth.user ? (
-              <button
-                type="button"
-                className="radar-account"
-                onClick={() => setAccountOpen(true)}
-                title={auth.wallet?.address}
-              >
-                @{auth.user.username}
-              </button>
-            ) : (
-              <button type="button" className="radar-account radar-account--cta" onClick={() => setAccountOpen(true)}>
-                Create account
-              </button>
-            )}
-          </div>
-        </div>
-      </nav>
+      <RadarNav active="radar" state={state} />
 
       <div className="ambient" aria-hidden="true">
         <div className="ambient-orb orb-a animate-drift" />
@@ -815,7 +774,6 @@ export default function NarraDashboard({
         </main>
         </HoverOverlay>
       </div>
-      <AccountModal open={accountOpen} onClose={() => setAccountOpen(false)} auth={auth} />
       <DeployTokenModal
         open={!!deployMeta}
         onClose={() => setDeployMeta(null)}

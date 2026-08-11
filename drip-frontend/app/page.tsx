@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import NarraDashboard from "@/components/narra/NarraDashboard";
 import { useNarra } from "@/lib/narra/useNarra";
+import { isBootDone, markBootDone } from "@/components/narra/RadarNav";
 
 const T = { bg: "#111114" } as const;
 const LOGO_SRC = "/logos/Betttr.png";
@@ -72,8 +73,23 @@ function CinematicIntro({ onComplete }: { onComplete: () => void }) {
 export default function Page() {
   const { state, loading, error, loaderDone, refreshLaunch } = useNarra();
   const [introDone, setIntroDone] = useState(false);
-  const finishIntro = useCallback(() => setIntroDone(true), []);
-  const onLoaderDone = useCallback(() => {}, []);
+  const [skipBoot, setSkipBoot] = useState(false);
+
+  useEffect(() => {
+    if (isBootDone()) {
+      setSkipBoot(true);
+      setIntroDone(true);
+    }
+  }, []);
+
+  const finishIntro = useCallback(() => {
+    markBootDone();
+    setIntroDone(true);
+  }, []);
+
+  const onLoaderDone = useCallback(() => {
+    markBootDone();
+  }, []);
 
   return (
     <div style={{ background: T.bg, minHeight: "100vh", color: "#F4F4F8" }}>
@@ -85,9 +101,9 @@ export default function Page() {
 
       {introDone && (
         <motion.div
-          initial={{ opacity: 0 }}
+          initial={false}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.6, ease }}
+          transition={{ duration: skipBoot ? 0 : 0.35, ease }}
           style={{ height: "100vh", overflow: "hidden" }}
         >
           <NarraDashboard
@@ -97,6 +113,7 @@ export default function Page() {
             loaderDone={loaderDone || !!error}
             onLoaderDone={onLoaderDone}
             onRefreshLaunch={refreshLaunch}
+            skipBoot={skipBoot}
           />
         </motion.div>
       )}
