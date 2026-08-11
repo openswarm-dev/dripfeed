@@ -5,6 +5,7 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
+const CACHE_KEY = "betttr_report_cache_v1";
 
 const EMPTY_LIVE: NarraLive = {
   connected: false,
@@ -31,6 +32,35 @@ function reportToState(report: NarraReport): NarraState {
     geyserEnabled: report.geyserEnabled,
     live: report.live ?? EMPTY_LIVE,
   };
+}
+
+function readCachedState(): NarraState | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as NarraReport & { cachedAt?: number };
+    if (!parsed || parsed.error) return null;
+    // Drop caches older than 10 minutes
+    if (parsed.cachedAt && Date.now() - parsed.cachedAt > 10 * 60_000) return null;
+    return reportToState(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedState(state: NarraState) {
+  try {
+    const payload = {
+      ...state,
+      generatedAt: new Date().toISOString(),
+      days: state.metas?.lookbackDays,
+      totalLaunches: state.metas?.totalLaunches,
+      cachedAt: Date.now(),
+    };
+    sessionStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch {
+    /* quota / private mode */
+  }
 }
 
 type PartialPayload = Partial<NarraReport & {
@@ -90,8 +120,6 @@ function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[])
     }
   }
 
-  // Stable feed order: keep first-seen order, prepend only brand-new mints.
-  // Never re-sort by blockTime — gap-fill was inserting mid-list and making cards jump.
   const seen = new Set<string>();
   const ordered: LaunchRecord[] = [];
   for (const mint of [...fresh.reverse(), ...existing.map((l) => l.mint)]) {
@@ -180,6 +208,7 @@ export function useNarra() {
   const [error, setError] = useState<string | null>(null);
   const [loaderDone, setLoaderDone] = useState(false);
   const esRef = useRef<EventSource | null>(null);
+  const hydratedRef = useRef(false);
 
   const mergePartial = useCallback((data: PartialPayload) => {
     setState((prev) => {
@@ -191,11 +220,22 @@ export function useNarra() {
         geyserEnabled: undefined,
         live: EMPTY_LIVE,
       };
-      return mergePayload(base, data);
+      const next = mergePayload(base, data);
+      writeCachedState(next);
+      return next;
     });
   }, []);
 
+  // Instant paint from session cache, then revalidate in parallel with SSE
   useEffect(() => {
+    const cached = readCachedState();
+    if (cached?.launches?.length || cached?.metas) {
+      setState(cached);
+      setLoading(false);
+      setLoaderDone(true);
+      hydratedRef.current = true;
+    }
+
     let cancelled = false;
 
     async function load() {
@@ -204,26 +244,38 @@ export function useNarra() {
         const report: NarraReport = await res.json();
         if (cancelled) return;
         if (!res.ok || report.error) {
-          setError(report.error ?? "Radar service unavailable");
+          if (!hydratedRef.current) {
+            setError(report.error ?? "Radar service unavailable");
+          }
         } else {
-          setState(reportToState(report));
+          setState((prev) => {
+            const next = prev ? mergePayload(prev, report) : reportToState(report);
+            writeCachedState(next);
+            return next;
+          });
+          setError(null);
+          hydratedRef.current = true;
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && !hydratedRef.current) {
           setError("Cannot reach radar backend. Run npm run dev in DEVSNIPER/narra (port 3950) or set RADAR_API_URL.");
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setLoaderDone(true);
+        }
       }
     }
 
-    load();
-    return () => { cancelled = true; };
+    void load();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
-    if (loading || error) return;
-
+    // Open SSE immediately — don't wait for report (was causing empty 10–30s shells)
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
 
@@ -240,7 +292,10 @@ export function useNarra() {
         liveLaunches: data.liveLaunches,
         liveSparks: data.liveSparks,
       });
+      setLoading(false);
       setLoaderDone(true);
+      setError(null);
+      hydratedRef.current = true;
     });
 
     es.addEventListener("launch", (e) => {
@@ -255,9 +310,9 @@ export function useNarra() {
       mergePartial(JSON.parse((e as MessageEvent).data));
     });
 
-    es.onerror = () => { /* EventSource auto-reconnects */ };
-
-    const fallback = setTimeout(() => setLoaderDone(true), 6000);
+    es.onerror = () => {
+      /* EventSource auto-reconnects */
+    };
 
     const poll = setInterval(async () => {
       try {
@@ -265,20 +320,23 @@ export function useNarra() {
         if (!res.ok) return;
         const report: NarraReport = await res.json();
         if (!report.error) {
-          setState((prev) => mergePayload(prev ?? reportToState(report), report));
+          setState((prev) => {
+            const next = mergePayload(prev ?? reportToState(report), report);
+            writeCachedState(next);
+            return next;
+          });
         }
       } catch {
         /* ignore */
       }
-    }, 8000);
+    }, 12_000);
 
     return () => {
-      clearTimeout(fallback);
       clearInterval(poll);
       es.close();
       esRef.current = null;
     };
-  }, [loading, error, mergePartial]);
+  }, [mergePartial]);
 
   const refreshLaunch = useCallback(async (mint: string) => {
     try {

@@ -75,6 +75,28 @@ function applyCors(req: http.IncomingMessage, res: http.ServerResponse) {
   }
 }
 
+function buildStreamInitPayload() {
+  const state = getState();
+  const geyserLive = state.feeds.geyser || (state.geyserStats?.perMinute ?? 0) > 0;
+  return {
+    connected: geyserLive || state.feeds.tweetstream,
+    feeds: {
+      ...state.feeds,
+      geyser: geyserLive,
+    },
+    geyserStats: state.geyserStats,
+    liveLaunches: state.liveLaunches,
+    liveSparks: state.liveSparks,
+    lastLaunchAt: state.lastLaunchAt,
+    lastSparkAt: state.lastSparkAt,
+    metas: state.metas,
+    // Cap payload — full launch history was multi‑MB and stalled first paint via Railway
+    launches: state.launches.slice(0, 200),
+    sparks: state.sparks.slice(0, 50),
+    geyserEnabled: config.geyserEnabled,
+  };
+}
+
 function buildReportPayload() {
   const state = getState();
   return {
@@ -82,26 +104,22 @@ function buildReportPayload() {
     days: state.metas.lookbackDays,
     totalLaunches: state.metas.totalLaunches,
     metas: state.metas,
-    launches: state.launches.slice(0, 500),
-    sparks: state.sparks,
+    launches: state.launches.slice(0, 200),
+    sparks: state.sparks.slice(0, 50),
     geyserStats: state.geyserStats,
     geyserEnabled: config.geyserEnabled,
     live: {
       connected: state.connected,
-      feeds: state.feeds,
+      feeds: {
+        ...state.feeds,
+        // Treat recent create activity as live even if the flag briefly flaps
+        geyser: state.feeds.geyser || (state.geyserStats?.perMinute ?? 0) > 0,
+      },
       liveLaunches: state.liveLaunches,
       liveSparks: state.liveSparks,
       lastLaunchAt: state.lastLaunchAt,
       lastSparkAt: state.lastSparkAt,
     },
-  };
-}
-
-function buildStreamInitPayload() {
-  const state = getState();
-  return {
-    ...state,
-    geyserEnabled: config.geyserEnabled,
   };
 }
 
