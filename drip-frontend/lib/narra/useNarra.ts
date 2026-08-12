@@ -196,8 +196,9 @@ export function useNarra() {
     setState((prev) => mergePayload(prev ?? EMPTY_STATE, data));
   }, []);
 
-  // Fallback HTTP fetch — only fires if SSE init hasn't arrived within 4s.
-  // SSE init is the primary data source; this is just a safety net.
+  // Fallback HTTP fetch — only fires if SSE init hasn't arrived within 6s.
+  // With lean SSE init this should almost never trigger, but keeps things working
+  // if Railway's SSE connection is slow on first load.
   useEffect(() => {
     let cancelled = false;
 
@@ -206,14 +207,16 @@ export function useNarra() {
       try {
         const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
         const report: NarraReport = await res.json();
-        if (cancelled || hydratedRef.current) return;
+        if (cancelled) return;
         if (!res.ok || report.error) {
           setError(report.error ?? "Radar service unavailable");
         } else {
           setState((prev) => prev ? mergePayload(prev, report) : reportToState(report));
           setError(null);
-          hydratedRef.current = true;
-          setLoaderDone(true);
+          if (!hydratedRef.current) {
+            hydratedRef.current = true;
+            setLoaderDone(true);
+          }
         }
       } catch {
         if (!cancelled && !hydratedRef.current) {
@@ -222,7 +225,7 @@ export function useNarra() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }, 4000);
+    }, 6000);
 
     return () => { cancelled = true; clearTimeout(fallback); };
   }, []);
@@ -249,9 +252,10 @@ export function useNarra() {
 
     es.addEventListener("init", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
-      // Completely replace state with the authoritative server snapshot
+      // SSE init is lean (launches only, no metas) for fast first paint.
+      // Set launches + live status immediately so the feed appears right away.
       setState({
-        metas: data.metas ?? null,
+        metas: null,
         launches: data.launches ?? [],
         sparks: data.sparks ?? [],
         geyserStats: data.geyserStats ?? EMPTY_GEYSER,
@@ -269,6 +273,15 @@ export function useNarra() {
       setLoaderDone(true);
       setError(null);
       hydratedRef.current = true;
+
+      // Immediately kick off a background fetch for metas+sparks (non-blocking).
+      // This fills in the Building/Hot/Opportunity feeds after the token feed is already visible.
+      fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((report: NarraReport) => {
+          setState((prev) => mergePayload(prev ?? EMPTY_STATE, report));
+        })
+        .catch(() => { /* non-fatal — metas will load on next refresh interval */ });
     });
 
     es.addEventListener("launch", (e) => {
