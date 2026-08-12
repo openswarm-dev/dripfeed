@@ -221,10 +221,10 @@ function NarraLoader({ onDone, ready }: { onDone: () => void; ready?: boolean })
       }, 120);
     };
 
-    // Data already here → skip the fake 3.8s wait.
+    // Exit as soon as data arrives — no artificial wait.
     if (ready) {
-      const t = setTimeout(finish, 180);
-      return () => clearTimeout(t);
+      finish();
+      return;
     }
 
     const t = setTimeout(finish, 3800);
@@ -750,6 +750,23 @@ export default function NarraDashboard({
         <HoverOverlay target={resolvedHover} onMouseEnter={cancelHideHover} onMouseLeave={hideHover}>
         <main className="dashboard">
           <div className="row-main">
+            <BetttrCard accent="launch">
+              <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
+              <p className="panel-hint">Live creates · Geyser + pump.fun</p>
+              <div className="card-scroll">
+                {!visibleLaunches.length ? (
+                  <p className="empty">Waiting for CreateV2 stream…</p>
+                ) : (
+                  <AnimatedFeed
+                    className="animated-feed"
+                    items={launchFeedItems}
+                    animateReorder={false}
+                    renderItem={(l) => <LaunchRow l={l} />}
+                  />
+                )}
+              </div>
+            </BetttrCard>
+
             <BetttrCard accent="timeline">
               <PanelTitle count={opportunityFeed.filter((e) => e.tier >= 2).length} variant="live">Opportunity feed</PanelTitle>
               <p className="panel-hint">Strongest setups · newest first</p>
@@ -829,23 +846,6 @@ export default function NarraDashboard({
                         onDeploy={setDeployMeta}
                       />
                     )}
-                  />
-                )}
-              </div>
-            </BetttrCard>
-
-            <BetttrCard accent="launch">
-              <PanelTitle count={visibleLaunches.length} variant="live">New launches</PanelTitle>
-              <p className="panel-hint">Live creates · Geyser + pump.fun</p>
-              <div className="card-scroll">
-                {!visibleLaunches.length ? (
-                  <p className="empty">Waiting for CreateV2 stream…</p>
-                ) : (
-                  <AnimatedFeed
-                    className="animated-feed"
-                    items={launchFeedItems}
-                    animateReorder={false}
-                    renderItem={(l) => <LaunchRow l={l} />}
                   />
                 )}
               </div>

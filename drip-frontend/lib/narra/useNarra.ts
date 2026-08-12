@@ -196,19 +196,19 @@ export function useNarra() {
     setState((prev) => mergePayload(prev ?? EMPTY_STATE, data));
   }, []);
 
-  // Fetch the report once on mount for metas + historical launches
+  // Fallback HTTP fetch — only fires if SSE init hasn't arrived within 4s.
+  // SSE init is the primary data source; this is just a safety net.
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    const fallback = setTimeout(async () => {
+      if (hydratedRef.current || cancelled) return;
       try {
         const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
         const report: NarraReport = await res.json();
-        if (cancelled) return;
+        if (cancelled || hydratedRef.current) return;
         if (!res.ok || report.error) {
-          if (!hydratedRef.current) {
-            setError(report.error ?? "Radar service unavailable");
-          }
+          setError(report.error ?? "Radar service unavailable");
         } else {
           setState((prev) => prev ? mergePayload(prev, report) : reportToState(report));
           setError(null);
@@ -217,15 +217,14 @@ export function useNarra() {
         }
       } catch {
         if (!cancelled && !hydratedRef.current) {
-          setError("Cannot reach radar backend. Run npm run dev in DEVSNIPER/narra (port 3950) or set RADAR_API_URL.");
+          setError("Cannot reach radar backend.");
         }
       } finally {
         if (!cancelled) setLoading(false);
       }
-    }
+    }, 4000);
 
-    void load();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; clearTimeout(fallback); };
   }, []);
 
   // SSE stream — new tokens arrive here in real time
