@@ -294,9 +294,9 @@ export default function NarraDashboard({
   onRefreshLaunch?: (mint: string) => void;
   skipBoot?: boolean;
 }) {
-  const [showLoader, setShowLoader] = useState(() => !(skipBoot || isBootDone()));
+  const [showLoader, setShowLoader] = useState(() => !skipBoot);
   const [stageFilter, setStageFilter] = useState<MetaStage | null>(null);
-  const [appVisible, setAppVisible] = useState(() => skipBoot || isBootDone());
+  const [appVisible, setAppVisible] = useState(() => skipBoot);
   const [deployMeta, setDeployMeta] = useState<MetaTrack | null>(null);
   const auth = useBetttrAuth();
   const [hoverTarget, setHoverTarget] = useState<{

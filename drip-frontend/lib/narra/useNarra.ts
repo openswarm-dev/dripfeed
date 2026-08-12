@@ -6,9 +6,13 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
-/** Boot paint only — never write on every live create (that blocked the UI). */
-const BOOT_CACHE_KEY = "betttr_boot_v3";
-const BOOT_CACHE_MAX_AGE_MS = 5 * 60_000; // 5 min max — stale launches must not persist
+
+// Nuke all old boot cache keys so stale data can never show up
+if (typeof window !== "undefined") {
+  try {
+    ["betttr_boot_v1", "betttr_boot_v2", "betttr_boot_v3"].forEach((k) => sessionStorage.removeItem(k));
+  } catch { /* ignore */ }
+}
 
 const EMPTY_LIVE: NarraLive = {
   connected: false,
@@ -26,6 +30,15 @@ const EMPTY_GEYSER: GeyserStats = {
   perMinute: 0,
 };
 
+const EMPTY_STATE: NarraState = {
+  metas: null,
+  launches: [],
+  sparks: [],
+  geyserStats: EMPTY_GEYSER,
+  geyserEnabled: undefined,
+  live: EMPTY_LIVE,
+};
+
 function reportToState(report: NarraReport): NarraState {
   return {
     metas: report.metas ?? null,
@@ -35,51 +48,6 @@ function reportToState(report: NarraReport): NarraState {
     geyserEnabled: report.geyserEnabled,
     live: report.live ?? EMPTY_LIVE,
   };
-}
-
-function readBootCache(): NarraState | null {
-  try {
-    const raw = sessionStorage.getItem(BOOT_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as NarraState & { cachedAt?: number };
-    if (!parsed?.metas && !parsed?.launches?.length) return null;
-    if (parsed.cachedAt && Date.now() - parsed.cachedAt > BOOT_CACHE_MAX_AGE_MS) return null;
-
-    // Validate launches are actually fresh — drop stale ones so they don't pollute the feed
-    const nowSec = Math.floor(Date.now() / 1000);
-    const freshLaunches = (parsed.launches ?? []).filter(
-      (l) => l.blockTime && (nowSec - l.blockTime) < 3600, // keep only < 1h old
-    );
-
-    return {
-      metas: parsed.metas ?? null,
-      launches: freshLaunches,
-      sparks: parsed.sparks ?? [],
-      geyserStats: parsed.geyserStats ?? EMPTY_GEYSER,
-      geyserEnabled: parsed.geyserEnabled,
-      live: parsed.live ?? EMPTY_LIVE,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function writeBootCache(state: NarraState) {
-  try {
-    // Keep boot snapshot lean — metas + newest launches only.
-    const payload = {
-      metas: state.metas,
-      launches: state.launches.slice(0, 120),
-      sparks: state.sparks.slice(0, 40),
-      geyserStats: state.geyserStats,
-      geyserEnabled: state.geyserEnabled,
-      live: state.live,
-      cachedAt: Date.now(),
-    };
-    sessionStorage.setItem(BOOT_CACHE_KEY, JSON.stringify(payload));
-  } catch {
-    /* quota / private mode */
-  }
 }
 
 type PartialPayload = Partial<NarraReport & {
@@ -135,17 +103,10 @@ function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord
 function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
   const byMint = new Map<string, LaunchRecord>();
   for (const l of existing) byMint.set(l.mint, l);
-
   for (const l of incoming) {
     const prev = byMint.get(l.mint);
-    if (prev) {
-      byMint.set(l.mint, mergeLaunchRecord(prev, l));
-    } else {
-      byMint.set(l.mint, l);
-    }
+    byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
   }
-
-  // Always order by create time — never by SSE arrival / report merge order.
   return [...byMint.values()]
     .sort((a, b) => {
       const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
@@ -223,29 +184,19 @@ function mergePayload(base: NarraState, data: PartialPayload): NarraState {
 }
 
 export function useNarra() {
-  const [state, setState] = useState<NarraState | null>(() => readBootCache());
-  const [loading, setLoading] = useState(() => !readBootCache()?.metas);
+  // Always start blank — SSE init and /report are the only sources of truth
+  const [state, setState] = useState<NarraState | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [loaderDone, setLoaderDone] = useState(() => Boolean(readBootCache()?.metas));
+  const [loaderDone, setLoaderDone] = useState(false);
   const esRef = useRef<EventSource | null>(null);
-  const hydratedRef = useRef(Boolean(readBootCache()?.metas));
+  const hydratedRef = useRef(false);
 
-  const mergePartial = useCallback((data: PartialPayload, opts?: { persistBoot?: boolean }) => {
-    setState((prev) => {
-      const base = prev ?? {
-        metas: null,
-        launches: [],
-        sparks: [],
-        geyserStats: EMPTY_GEYSER,
-        geyserEnabled: undefined,
-        live: EMPTY_LIVE,
-      };
-      const next = mergePayload(base, data);
-      if (opts?.persistBoot && next.metas) writeBootCache(next);
-      return next;
-    });
+  const mergePartial = useCallback((data: PartialPayload) => {
+    setState((prev) => mergePayload(prev ?? EMPTY_STATE, data));
   }, []);
 
+  // Fetch the report once on mount for metas + historical launches
   useEffect(() => {
     let cancelled = false;
 
@@ -259,11 +210,7 @@ export function useNarra() {
             setError(report.error ?? "Radar service unavailable");
           }
         } else {
-          setState((prev) => {
-            const next = prev ? mergePayload(prev, report) : reportToState(report);
-            writeBootCache(next);
-            return next;
-          });
+          setState((prev) => prev ? mergePayload(prev, report) : reportToState(report));
           setError(null);
           hydratedRef.current = true;
           setLoaderDone(true);
@@ -278,64 +225,46 @@ export function useNarra() {
     }
 
     void load();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, []);
 
+  // SSE stream — new tokens arrive here in real time
   useEffect(() => {
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
 
-    // Paint one create per frame — EventSource often delivers a gap-fill burst
-    // in one chunk and React 18 would coalesce them into a single batch update.
+    // Drain one token per frame so bursts don't freeze the UI
     const launchQueue: PartialPayload[] = [];
     let draining = false;
     const drainLaunches = () => {
       const next = launchQueue.shift();
-      if (!next) {
-        draining = false;
-        return;
-      }
-      flushSync(() => {
-        mergePartial(next);
-      });
-      if (launchQueue.length) {
-        requestAnimationFrame(drainLaunches);
-      } else {
-        draining = false;
-      }
+      if (!next) { draining = false; return; }
+      flushSync(() => mergePartial(next));
+      if (launchQueue.length) requestAnimationFrame(drainLaunches);
+      else draining = false;
     };
     const enqueueLaunch = (data: PartialPayload) => {
       launchQueue.push(data);
-      if (draining) return;
-      draining = true;
-      requestAnimationFrame(drainLaunches);
+      if (!draining) { draining = true; requestAnimationFrame(drainLaunches); }
     };
 
     es.addEventListener("init", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
-      // On init, the server sends the authoritative sorted launch list.
-      // Replace (not merge) launches so stale boot-cache entries don't pollute the feed.
-      setState((prev) => {
-        const freshLaunches: LaunchRecord[] = data.launches ?? [];
-        const live: NarraLive = {
-          ...(prev?.live ?? EMPTY_LIVE),
-          connected: data.connected ?? prev?.live?.connected ?? false,
-          feeds: data.feeds ?? prev?.live?.feeds ?? EMPTY_LIVE.feeds,
-          liveLaunches: data.liveLaunches ?? prev?.live?.liveLaunches ?? 0,
-          liveSparks: data.liveSparks ?? prev?.live?.liveSparks ?? 0,
-        };
-        const next: NarraState = {
-          metas: data.metas ?? prev?.metas ?? null,
-          launches: freshLaunches,
-          sparks: data.sparks ?? prev?.sparks ?? [],
-          geyserStats: data.geyserStats ?? prev?.geyserStats ?? EMPTY_GEYSER,
-          geyserEnabled: data.geyserEnabled ?? prev?.geyserEnabled,
-          live,
-        };
-        writeBootCache(next);
-        return next;
+      // Completely replace state with the authoritative server snapshot
+      setState({
+        metas: data.metas ?? null,
+        launches: data.launches ?? [],
+        sparks: data.sparks ?? [],
+        geyserStats: data.geyserStats ?? EMPTY_GEYSER,
+        geyserEnabled: data.geyserEnabled,
+        live: {
+          connected: data.connected ?? false,
+          feeds: data.feeds ?? EMPTY_LIVE.feeds,
+          liveLaunches: data.liveLaunches ?? 0,
+          liveSparks: data.liveSparks ?? 0,
+          lastLaunchAt: null,
+          lastSparkAt: null,
+        },
       });
       setLoading(false);
       setLoaderDone(true);
@@ -352,12 +281,10 @@ export function useNarra() {
     });
 
     es.addEventListener("refresh", (e) => {
-      mergePartial(JSON.parse((e as MessageEvent).data), { persistBoot: true });
+      mergePartial(JSON.parse((e as MessageEvent).data));
     });
 
-    es.onerror = () => {
-      /* EventSource auto-reconnects */
-    };
+    es.onerror = () => { /* EventSource auto-reconnects */ };
 
     return () => {
       launchQueue.length = 0;
@@ -372,9 +299,7 @@ export function useNarra() {
       if (!res.ok) return;
       const data = (await res.json()) as { launch?: LaunchRecord };
       if (data.launch) mergePartial({ launch: data.launch });
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
   }, [mergePartial]);
 
   return { state, loading, error, loaderDone, refreshLaunch };
