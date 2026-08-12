@@ -168,7 +168,8 @@ export interface NarraReport {
 
 export interface NarraState {
   metas: MetaDashboard | null;
-  launches: LaunchRecord[];
+  /** Geyser-only new launches feed — prepend order, never re-sorted from DB. */
+  liveFeed: LaunchRecord[];
   sparks: SocialSpark[];
   geyserStats: GeyserStats;
   geyserEnabled?: boolean;

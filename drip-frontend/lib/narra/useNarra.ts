@@ -7,7 +7,18 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
 
-// Nuke all old boot cache keys so stale data can never show up
+const BOOT_CACHE_KEY = "betttr_live_v4";
+const BOOT_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
+const LIVE_FEED_MAX = 150;
+
+interface BootCache {
+  at: number;
+  liveFeed: LaunchRecord[];
+  geyserStats: GeyserStats;
+  live: NarraLive;
+  geyserEnabled?: boolean;
+}
+
 if (typeof window !== "undefined") {
   try {
     ["betttr_boot_v1", "betttr_boot_v2", "betttr_boot_v3"].forEach((k) => sessionStorage.removeItem(k));
@@ -32,38 +43,54 @@ const EMPTY_GEYSER: GeyserStats = {
 
 const EMPTY_STATE: NarraState = {
   metas: null,
-  launches: [],
+  liveFeed: [],
   sparks: [],
   geyserStats: EMPTY_GEYSER,
   geyserEnabled: undefined,
   live: EMPTY_LIVE,
 };
 
-function reportToState(report: NarraReport): NarraState {
-  return {
-    metas: report.metas ?? null,
-    launches: report.launches ?? [],
-    sparks: report.sparks ?? [],
-    geyserStats: report.geyserStats ?? EMPTY_GEYSER,
-    geyserEnabled: report.geyserEnabled,
-    live: report.live ?? EMPTY_LIVE,
-  };
+function readBootCache(): BootCache | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(BOOT_CACHE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw) as BootCache;
+    if (Date.now() - data.at > BOOT_CACHE_MAX_AGE_MS) return null;
+    const nowSec = Math.floor(Date.now() / 1000);
+    data.liveFeed = (data.liveFeed ?? []).filter(
+      (l) => !l.blockTime || nowSec - l.blockTime < 7200,
+    );
+    return data;
+  } catch {
+    return null;
+  }
 }
 
-type PartialPayload = Partial<NarraReport & {
-  metas?: MetaDashboard;
-  launches?: LaunchRecord[];
-  sparks?: SocialSpark[];
-  geyserStats?: GeyserStats;
-  geyserEnabled?: boolean;
-  live?: NarraLive;
-  launch?: LaunchRecord;
-  spark?: SocialSpark;
-  connected?: boolean;
-  feeds?: NarraLive["feeds"];
-  liveLaunches?: number;
-  liveSparks?: number;
-}>;
+function writeBootCache(state: Pick<NarraState, "liveFeed" | "geyserStats" | "live" | "geyserEnabled">) {
+  if (typeof window === "undefined") return;
+  try {
+    const payload: BootCache = {
+      at: Date.now(),
+      liveFeed: state.liveFeed.slice(0, LIVE_FEED_MAX),
+      geyserStats: state.geyserStats,
+      live: state.live,
+      geyserEnabled: state.geyserEnabled,
+    };
+    sessionStorage.setItem(BOOT_CACHE_KEY, JSON.stringify(payload));
+  } catch { /* ignore */ }
+}
+
+function cacheToState(cache: BootCache): NarraState {
+  return {
+    metas: null,
+    liveFeed: cache.liveFeed,
+    sparks: [],
+    geyserStats: cache.geyserStats ?? EMPTY_GEYSER,
+    geyserEnabled: cache.geyserEnabled,
+    live: cache.live ?? EMPTY_LIVE,
+  };
+}
 
 /** Never let empty/zero polls erase known-good metrics. */
 function keepMetric(next: number | undefined, prev: number | undefined): number | undefined {
@@ -73,17 +100,9 @@ function keepMetric(next: number | undefined, prev: number | undefined): number 
 }
 
 function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
-  let blockTime = prev.blockTime ?? next.blockTime ?? null;
-  if (prev.blockTime != null && next.blockTime != null) {
-    blockTime = Math.min(prev.blockTime, next.blockTime);
-  }
-  const slot = Math.max(prev.slot ?? 0, next.slot ?? 0);
-
   return {
     ...prev,
     ...next,
-    blockTime,
-    slot,
     name: next.name ?? prev.name,
     symbol: next.symbol ?? prev.symbol,
     image: next.image ?? prev.image,
@@ -100,20 +119,18 @@ function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord
   };
 }
 
-function mergeLaunchesByMint(existing: LaunchRecord[], incoming: LaunchRecord[]): LaunchRecord[] {
-  const byMint = new Map<string, LaunchRecord>();
-  for (const l of existing) byMint.set(l.mint, l);
-  for (const l of incoming) {
-    const prev = byMint.get(l.mint);
-    byMint.set(l.mint, prev ? mergeLaunchRecord(prev, l) : l);
+/** Prepend new tokens at top; patch enrichments in place — never re-sort. */
+function applyLiveLaunch(feed: LaunchRecord[], launch: LaunchRecord): LaunchRecord[] {
+  const idx = feed.findIndex((l) => l.mint === launch.mint);
+  if (idx === 0) {
+    return [mergeLaunchRecord(feed[0]!, launch), ...feed.slice(1)].slice(0, LIVE_FEED_MAX);
   }
-  return [...byMint.values()]
-    .sort((a, b) => {
-      const bt = (b.blockTime ?? 0) - (a.blockTime ?? 0);
-      if (bt !== 0) return bt;
-      return (b.slot ?? 0) - (a.slot ?? 0);
-    })
-    .slice(0, 5000);
+  if (idx > 0) {
+    const next = [...feed];
+    next[idx] = mergeLaunchRecord(feed[idx]!, launch);
+    return next;
+  }
+  return [launch, ...feed].slice(0, LIVE_FEED_MAX);
 }
 
 function mergeMetas(prev: MetaDashboard | null, next: MetaDashboard | null | undefined): MetaDashboard | null {
@@ -147,12 +164,26 @@ function mergeMetas(prev: MetaDashboard | null, next: MetaDashboard | null | und
   };
 }
 
+type PartialPayload = Partial<NarraReport & {
+  metas?: MetaDashboard;
+  launches?: LaunchRecord[];
+  sparks?: SocialSpark[];
+  geyserStats?: GeyserStats;
+  geyserEnabled?: boolean;
+  live?: NarraLive;
+  launch?: LaunchRecord;
+  spark?: SocialSpark;
+  connected?: boolean;
+  feeds?: NarraLive["feeds"];
+  liveLaunches?: number;
+  liveSparks?: number;
+}>;
+
+/** Merge SSE/report payloads — never let DB/historical launches touch liveFeed. */
 function mergePayload(base: NarraState, data: PartialPayload): NarraState {
-  let launches = base.launches;
-  if (data.launches) {
-    launches = mergeLaunchesByMint(base.launches, data.launches);
-  } else if (data.launch) {
-    launches = mergeLaunchesByMint(base.launches, [data.launch]);
+  let liveFeed = base.liveFeed;
+  if (data.launch) {
+    liveFeed = applyLiveLaunch(base.liveFeed, data.launch);
   }
 
   let sparks = base.sparks;
@@ -175,7 +206,7 @@ function mergePayload(base: NarraState, data: PartialPayload): NarraState {
 
   return {
     metas: mergeMetas(base.metas, data.metas),
-    launches,
+    liveFeed,
     sparks,
     geyserStats: data.geyserStats ?? base.geyserStats,
     geyserEnabled: data.geyserEnabled ?? base.geyserEnabled,
@@ -184,58 +215,59 @@ function mergePayload(base: NarraState, data: PartialPayload): NarraState {
 }
 
 export function useNarra() {
-  // Always start blank — SSE init and /report are the only sources of truth
-  const [state, setState] = useState<NarraState | null>(null);
-  const [loading, setLoading] = useState(true);
+  const bootCache = typeof window !== "undefined" ? readBootCache() : null;
+  const [state, setState] = useState<NarraState | null>(() => (bootCache ? cacheToState(bootCache) : null));
+  const [loading, setLoading] = useState(!bootCache);
   const [error, setError] = useState<string | null>(null);
-  const [loaderDone, setLoaderDone] = useState(false);
+  const [loaderDone, setLoaderDone] = useState(!!bootCache);
   const esRef = useRef<EventSource | null>(null);
-  const hydratedRef = useRef(false);
+  const hydratedRef = useRef(!!bootCache);
+
+  const persistCache = useCallback((next: NarraState) => {
+    writeBootCache(next);
+  }, []);
 
   const mergePartial = useCallback((data: PartialPayload) => {
-    setState((prev) => mergePayload(prev ?? EMPTY_STATE, data));
-  }, []);
+    setState((prev) => {
+      const merged = mergePayload(prev ?? EMPTY_STATE, data);
+      persistCache(merged);
+      return merged;
+    });
+  }, [persistCache]);
 
-  // Fallback HTTP fetch — only fires if SSE init hasn't arrived within 6s.
-  // With lean SSE init this should almost never trigger, but keeps things working
-  // if Railway's SSE connection is slow on first load.
+  // Metas only — never pollutes the geyser live feed.
   useEffect(() => {
     let cancelled = false;
+    const loadMetas = () => {
+      fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" })
+        .then((r) => r.json())
+        .then((report: NarraReport) => {
+          if (cancelled) return;
+          setState((prev) => mergePayload(prev ?? EMPTY_STATE, {
+            metas: report.metas,
+            sparks: report.sparks,
+            geyserStats: report.geyserStats,
+            geyserEnabled: report.geyserEnabled,
+            live: report.live,
+          }));
+        })
+        .catch(() => { /* non-fatal */ });
+    };
 
-    const fallback = setTimeout(async () => {
-      if (hydratedRef.current || cancelled) return;
-      try {
-        const res = await fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" });
-        const report: NarraReport = await res.json();
-        if (cancelled) return;
-        if (!res.ok || report.error) {
-          setError(report.error ?? "Radar service unavailable");
-        } else {
-          setState((prev) => prev ? mergePayload(prev, report) : reportToState(report));
-          setError(null);
-          if (!hydratedRef.current) {
-            hydratedRef.current = true;
-            setLoaderDone(true);
-          }
-        }
-      } catch {
-        if (!cancelled && !hydratedRef.current) {
-          setError("Cannot reach radar backend.");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }, 6000);
+    if (!bootCache) {
+      const t = setTimeout(loadMetas, 6000);
+      return () => { cancelled = true; clearTimeout(t); };
+    }
+    loadMetas();
+    const iv = setInterval(loadMetas, 120_000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [bootCache]);
 
-    return () => { cancelled = true; clearTimeout(fallback); };
-  }, []);
-
-  // SSE stream — new tokens arrive here in real time
+  // SSE — geyser live feed streams here in real time.
   useEffect(() => {
     const es = new EventSource(`${API_BASE}/api/radar/stream`);
     esRef.current = es;
 
-    // Drain one token per frame so bursts don't freeze the UI
     const launchQueue: PartialPayload[] = [];
     let draining = false;
     const drainLaunches = () => {
@@ -252,36 +284,46 @@ export function useNarra() {
 
     es.addEventListener("init", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
-      // SSE init is lean (launches only, no metas) for fast first paint.
-      // Set launches + live status immediately so the feed appears right away.
-      setState({
-        metas: null,
-        launches: data.launches ?? [],
-        sparks: data.sparks ?? [],
-        geyserStats: data.geyserStats ?? EMPTY_GEYSER,
-        geyserEnabled: data.geyserEnabled,
-        live: {
-          connected: data.connected ?? false,
-          feeds: data.feeds ?? EMPTY_LIVE.feeds,
-          liveLaunches: data.liveLaunches ?? 0,
-          liveSparks: data.liveSparks ?? 0,
-          lastLaunchAt: null,
-          lastSparkAt: null,
-        },
+      // launches from SSE init = geyser-only liveFeed from backend (not DB).
+      const serverFeed: LaunchRecord[] = data.launches ?? [];
+      setState((prev) => {
+        const base = prev ?? EMPTY_STATE;
+        let liveFeed = base.liveFeed;
+        for (let i = serverFeed.length - 1; i >= 0; i--) {
+          liveFeed = applyLiveLaunch(liveFeed, serverFeed[i]!);
+        }
+        const merged: NarraState = {
+          ...base,
+          liveFeed,
+          geyserStats: data.geyserStats ?? base.geyserStats,
+          geyserEnabled: data.geyserEnabled ?? base.geyserEnabled,
+          live: {
+            ...base.live,
+            connected: data.connected ?? false,
+            feeds: data.feeds ?? EMPTY_LIVE.feeds,
+            liveLaunches: data.liveLaunches ?? liveFeed.length,
+            liveSparks: data.liveSparks ?? 0,
+            lastLaunchAt: data.lastLaunchAt ?? null,
+            lastSparkAt: data.lastSparkAt ?? null,
+          },
+        };
+        writeBootCache(merged);
+        return merged;
       });
       setLoading(false);
       setLoaderDone(true);
       setError(null);
       hydratedRef.current = true;
 
-      // Immediately kick off a background fetch for metas+sparks (non-blocking).
-      // This fills in the Building/Hot/Opportunity feeds after the token feed is already visible.
       fetch(`${API_BASE}/api/radar/report`, { cache: "no-store" })
         .then((r) => r.json())
         .then((report: NarraReport) => {
-          setState((prev) => mergePayload(prev ?? EMPTY_STATE, report));
+          setState((prev) => mergePayload(prev ?? EMPTY_STATE, {
+            metas: report.metas,
+            sparks: report.sparks,
+          }));
         })
-        .catch(() => { /* non-fatal — metas will load on next refresh interval */ });
+        .catch(() => { /* non-fatal */ });
     });
 
     es.addEventListener("launch", (e) => {
@@ -293,7 +335,14 @@ export function useNarra() {
     });
 
     es.addEventListener("refresh", (e) => {
-      mergePartial(JSON.parse((e as MessageEvent).data));
+      const data = JSON.parse((e as MessageEvent).data);
+      // refresh = metas/metrics only — ignore any launches array from DB rebroadcasts.
+      mergePartial({
+        metas: data.metas,
+        sparks: data.sparks,
+        geyserStats: data.geyserStats,
+        liveLaunches: data.liveLaunches,
+      });
     });
 
     es.onerror = () => { /* EventSource auto-reconnects */ };

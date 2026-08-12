@@ -256,15 +256,15 @@ function NarraLoader({ onDone, ready }: { onDone: () => void; ready?: boolean })
         <div className="loader-brand">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src={LOGO_SRC} alt="Betttr.xyz" className="auth-overlay-logo" style={{ margin: "0 auto 12px" }} />
-          <p className="loader-sub">Real-time meta radar · pump.fun · trader psychology</p>
+          <p className="loader-sub">Engine warming · Geyser streaming live · pump.fun</p>
         </div>
 
         <div className="loader-card">
           <div className="rainbow-bg loader-stripe" />
           <div className="loader-steps">
-            {step("geyser", geyser, "Geyser live stream")}
-            {step("x", x, "X social sparks")}
-            {step("meta", meta, "Meta psychology engine")}
+            {step("geyser", geyser, "Engine warming up")}
+            {step("x", x, "Geyser streaming live")}
+            {step("meta", meta, "Building meta clusters")}
           </div>
         </div>
 
@@ -351,7 +351,7 @@ export default function NarraDashboard({
   };
 
   const metas = state?.metas ?? null;
-  const launches = state?.launches ?? [];
+  const liveFeed = state?.liveFeed ?? [];
   const sparks = state?.sparks ?? [];
   const geyserStats = state?.geyserStats;
   const live = state?.live;
@@ -415,7 +415,7 @@ export default function NarraDashboard({
     const seenMints = new Set<string>();
     const seenMetas = new Set<string>();
 
-    for (const l of launches) {
+    for (const l of liveFeed) {
       if (!l.blockTime || seenMints.has(l.mint)) continue;
       seenMints.add(l.mint);
       const parts = [
@@ -507,7 +507,7 @@ export default function NarraDashboard({
       .slice(0, 80);
 
     return quality;
-  }, [launches, metas]);
+  }, [liveFeed, metas]);
 
   const opportunityFeed = timelineEvents;
 
@@ -586,8 +586,8 @@ export default function NarraDashboard({
   );
 
   const visibleLaunches = useMemo(
-    () => launches.filter((l) => shouldShowLaunch(l)),
-    [launches],
+    () => liveFeed.filter((l) => shouldShowLaunch(l)),
+    [liveFeed],
   );
 
   const launchFeedItems = useMemo(
@@ -654,14 +654,14 @@ export default function NarraDashboard({
             {!hero || !metas ? (
               <div className="hero-inner">
                 <div className="hero-theme rainbow-text">
-                  {launches.length > 0
-                    ? `Live · ${launches.length} creates streaming`
+                  {liveFeed.length > 0
+                    ? `Live · ${liveFeed.length} creates streaming`
                     : (metas?.insight ?? "Scanning pump.fun…")}
                 </div>
-                {launches.length > 0 && (
+                {liveFeed.length > 0 && (
                   <div className="hero-stats">
                     <div className="hero-stat">
-                      <span className="val t-metric">{launches.length}</span>
+                      <span className="val t-metric">{liveFeed.length}</span>
                       <span className="lbl">creates</span>
                     </div>
                     <div className="hero-stat">

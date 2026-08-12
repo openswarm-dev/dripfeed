@@ -35,7 +35,7 @@ export function RadarNav({
   const auth = useBetttrAuth();
   const [accountOpen, setAccountOpen] = useState(false);
   const metas = state?.metas ?? null;
-  const launches = state?.launches ?? [];
+  const liveFeed = state?.liveFeed ?? [];
   const geyserStats = state?.geyserStats;
   const live = state?.live;
   const feeds = live?.feeds;
@@ -77,7 +77,7 @@ export function RadarNav({
             </div>
             <div className="radar-pill radar-pill--stats">
               {metas
-                ? `${launches.length} creates · ${metas.activeMetaCount} active · ${metas.formingCount} forming · ${capitalize(metas.dominantStage)}`
+                ? `${liveFeed.length} live · ${metas.activeMetaCount} active · ${metas.formingCount} forming · ${capitalize(metas.dominantStage)}`
                 : "—"}
             </div>
             {auth.user ? (
