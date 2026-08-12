@@ -7,7 +7,7 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
 
-const BOOT_CACHE_KEY = "betttr_live_v4";
+const BOOT_CACHE_KEY = "betttr_live_v5";
 const BOOT_CACHE_MAX_AGE_MS = 10 * 60 * 1000;
 const LIVE_FEED_MAX = 150;
 
@@ -21,7 +21,7 @@ interface BootCache {
 
 if (typeof window !== "undefined") {
   try {
-    ["betttr_boot_v1", "betttr_boot_v2", "betttr_boot_v3"].forEach((k) => sessionStorage.removeItem(k));
+    ["betttr_boot_v1", "betttr_boot_v2", "betttr_boot_v3", "betttr_live_v4"].forEach((k) => sessionStorage.removeItem(k));
   } catch { /* ignore */ }
 }
 
@@ -100,9 +100,15 @@ function keepMetric(next: number | undefined, prev: number | undefined): number 
 }
 
 function mergeLaunchRecord(prev: LaunchRecord, next: LaunchRecord): LaunchRecord {
+  let blockTime = prev.blockTime ?? next.blockTime ?? null;
+  if (prev.blockTime != null && next.blockTime != null) {
+    blockTime = Math.min(prev.blockTime, next.blockTime);
+  }
+
   return {
     ...prev,
     ...next,
+    blockTime,
     name: next.name ?? prev.name,
     symbol: next.symbol ?? prev.symbol,
     image: next.image ?? prev.image,

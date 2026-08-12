@@ -585,10 +585,15 @@ export default function NarraDashboard({
     [activeMetas],
   );
 
-  const visibleLaunches = useMemo(
-    () => liveFeed.filter((l) => shouldShowLaunch(l)),
-    [liveFeed],
-  );
+  const visibleLaunches = useMemo(() => {
+    const nowSec = Math.floor(Date.now() / 1000);
+    return liveFeed.filter((l) => {
+      if (!shouldShowLaunch(l, nowSec)) return false;
+      // Only show genuinely fresh on-chain creates (< 3 min).
+      if (l.blockTime && nowSec - l.blockTime > 180) return false;
+      return true;
+    });
+  }, [liveFeed]);
 
   const launchFeedItems = useMemo(
     () => visibleLaunches.slice(0, 80).map((l) => ({ ...l, id: l.mint })),
