@@ -7,8 +7,8 @@ import type { GeyserStats, MetaDashboard, NarraLive, NarraReport, NarraState, La
 /** Same-origin proxy — see app/api/radar/* */
 const API_BASE = "";
 /** Boot paint only — never write on every live create (that blocked the UI). */
-const BOOT_CACHE_KEY = "betttr_boot_v2";
-const BOOT_CACHE_MAX_AGE_MS = 15 * 60_000;
+const BOOT_CACHE_KEY = "betttr_boot_v3";
+const BOOT_CACHE_MAX_AGE_MS = 5 * 60_000; // 5 min max — stale launches must not persist
 
 const EMPTY_LIVE: NarraLive = {
   connected: false,
@@ -44,9 +44,16 @@ function readBootCache(): NarraState | null {
     const parsed = JSON.parse(raw) as NarraState & { cachedAt?: number };
     if (!parsed?.metas && !parsed?.launches?.length) return null;
     if (parsed.cachedAt && Date.now() - parsed.cachedAt > BOOT_CACHE_MAX_AGE_MS) return null;
+
+    // Validate launches are actually fresh — drop stale ones so they don't pollute the feed
+    const nowSec = Math.floor(Date.now() / 1000);
+    const freshLaunches = (parsed.launches ?? []).filter(
+      (l) => l.blockTime && (nowSec - l.blockTime) < 3600, // keep only < 1h old
+    );
+
     return {
       metas: parsed.metas ?? null,
-      launches: parsed.launches ?? [],
+      launches: freshLaunches,
       sparks: parsed.sparks ?? [],
       geyserStats: parsed.geyserStats ?? EMPTY_GEYSER,
       geyserEnabled: parsed.geyserEnabled,
@@ -308,20 +315,28 @@ export function useNarra() {
 
     es.addEventListener("init", (e) => {
       const data = JSON.parse((e as MessageEvent).data);
-      mergePartial(
-        {
-          metas: data.metas,
-          launches: data.launches,
-          sparks: data.sparks,
-          geyserStats: data.geyserStats,
-          geyserEnabled: data.geyserEnabled,
-          connected: data.connected,
-          feeds: data.feeds,
-          liveLaunches: data.liveLaunches,
-          liveSparks: data.liveSparks,
-        },
-        { persistBoot: true },
-      );
+      // On init, the server sends the authoritative sorted launch list.
+      // Replace (not merge) launches so stale boot-cache entries don't pollute the feed.
+      setState((prev) => {
+        const freshLaunches: LaunchRecord[] = data.launches ?? [];
+        const live: NarraLive = {
+          ...(prev?.live ?? EMPTY_LIVE),
+          connected: data.connected ?? prev?.live?.connected ?? false,
+          feeds: data.feeds ?? prev?.live?.feeds ?? EMPTY_LIVE.feeds,
+          liveLaunches: data.liveLaunches ?? prev?.live?.liveLaunches ?? 0,
+          liveSparks: data.liveSparks ?? prev?.live?.liveSparks ?? 0,
+        };
+        const next: NarraState = {
+          metas: data.metas ?? prev?.metas ?? null,
+          launches: freshLaunches,
+          sparks: data.sparks ?? prev?.sparks ?? [],
+          geyserStats: data.geyserStats ?? prev?.geyserStats ?? EMPTY_GEYSER,
+          geyserEnabled: data.geyserEnabled ?? prev?.geyserEnabled,
+          live,
+        };
+        writeBootCache(next);
+        return next;
+      });
       setLoading(false);
       setLoaderDone(true);
       setError(null);
